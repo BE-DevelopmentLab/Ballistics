@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ballistic Calculator</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#10130f">
+<link rel="icon" href="icon-192.png">
+<style>
+  :root { --bg:#10130f; --panel:#1a1f18; --line:#2c3427; --fg:#e8ecdf; --dim:#97a28a; --acc:#b6d36a; --warn:#e5a04a; --bad:#e26b5a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.4 system-ui,sans-serif; padding:12px 12px 40px; max-width:560px; margin-inline:auto; }
+  h1 { font-size:18px; margin:4px 0 10px; }
+  h2 { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin:0 0 8px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:12px; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  label { display:block; font-size:12px; color:var(--dim); }
+  input, select, button { width:100%; font:inherit; color:var(--fg); background:#0d100c; border:1px solid var(--line); border-radius:8px; padding:10px; }
+  button { background:var(--acc); color:#10130f; font-weight:600; border:0; }
+  button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  .status { font-size:13px; padding:8px 10px; border-radius:8px; background:#0d100c; border:1px solid var(--line); margin-bottom:12px; }
+  .status.ok { color:var(--acc); } .status.warn { color:var(--warn); } .status.bad { color:var(--bad); }
+  .big { display:grid; grid-template-columns:1fr 1fr; gap:8px; text-align:center; }
+  .big div { background:#0d100c; border:1px solid var(--line); border-radius:10px; padding:10px 4px; }
+  .big .v { font-size:34px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .big .k { font-size:12px; color:var(--dim); }
+  .small { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:8px; font-size:13px; text-align:center; color:var(--dim); }
+  .small b { display:block; color:var(--fg); font-size:15px; }
+  .env { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; font-size:13px; color:var(--dim); text-align:center; }
+  .env b { display:block; color:var(--fg); font-size:15px; }
+  .demo { background:var(--warn); color:#10130f; padding:6px 10px; border-radius:8px; font-weight:600; margin-bottom:12px; text-align:center; }
+  .hide { display:none; }
+  .check { display:flex; gap:8px; align-items:center; margin-top:8px; font-size:14px; color:var(--fg); }
+  .check input { width:auto; }
+</style>
+</head>
+<body>
+<h1>Ballistic Calculator</h1>
+<div id="demoBanner" class="demo hide">DEMO MODE: numbers are made up, not real ballistics</div>
+<div id="status" class="status warn">Not connected</div>
+
+<section>
+  <div class="row">
+    <button id="btnConnect">Connect</button>
+    <button id="btnDemo" class="ghost">Demo (no hardware)</button>
+  </div>
+</section>
+
+<section>
+  <h2>Solution</h2>
+  <div class="big">
+    <div><div class="v" id="outElev">--</div><div class="k" id="outElevK">elevation</div></div>
+    <div><div class="v" id="outWind">--</div><div class="k" id="outWindK">windage</div></div>
+  </div>
+  <div class="small">
+    <div><b id="outTof">--</b>time of flight</div>
+    <div><b id="outVel">--</b>velocity</div>
+    <div><b id="outUsed">--</b>wind used</div>
+  </div>
+</section>
+
+<section>
+  <h2>Shot</h2>
+  <div class="row">
+    <div><label id="lRange">Range</label><input id="range" type="number" inputmode="decimal" value="500"></div>
+    <div><label>Wind from (clock, 12 = head, 3 = right)</label>
+      <select id="clock"></select></div>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <div><label>Wind speed source</label>
+      <select id="windSrc"><option value="sensor">Measured by sensor</option><option value="manual">Enter manually</option></select></div>
+    <div id="manualWindBox" class="hide"><label id="lWind">Wind speed</label><input id="windManual" type="number" inputmode="decimal" value="0"></div>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <div><label>Slope source</label>
+      <select id="slopeSrc"><option value="imu">Measured by sensor</option><option value="manual">Enter manually</option></select></div>
+    <div id="manualSlopeBox" class="hide"><label>Slope (deg, uphill +)</label><input id="slopeManual" type="number" inputmode="decimal" value="0"></div>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <div><label>Angle units</label><select id="angUnit"><option value="MIL">MIL</option><option value="MOA">MOA</option></select></div>
+    <div><label>Units</label><select id="units"><option value="imp">Imperial</option><option value="met">Metric</option></select></div>
+  </div>
+</section>
+
+<section>
+  <h2>Live conditions</h2>
+  <div class="env">
+    <div><b id="eTemp">--</b>temp</div><div><b id="eRh">--</b>humidity</div><div><b id="ePress">--</b>pressure</div>
+    <div><b id="eWind">--</b>wind</div><div><b id="eHead">--</b>heading</div><div><b id="ePitch">--</b>pitch</div>
+    <div><b id="eDa">--</b>density alt</div><div></div><div></div>
+  </div>
+</section>
+
+<section>
+  <h2>Rifle and load</h2>
+  <div class="row">
+    <div><label>Drag model</label><select id="model"><option>G1</option><option selected>G7</option></select></div>
+    <div><label>Ballistic coefficient (lb/in²)</label><input id="bc" type="number" inputmode="decimal" step="0.001" value="0.243"></div>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <div><label id="lMv">Muzzle velocity</label><input id="mv" type="number" inputmode="decimal" value="2600"></div>
+    <div><label id="lSight">Sight height</label><input id="sight" type="number" inputmode="decimal" step="0.1" value="1.5"></div>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <div><label id="lZero">Zero range</label><input id="zero" type="number" inputmode="decimal" value="100"></div>
+    <div><label id="lZt">Zero temperature</label><input id="zt" type="number" inputmode="decimal" value="59"></div>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <div><label id="lZp">Zero pressure (station)</label><input id="zp" type="number" inputmode="decimal" step="0.01" value="29.92"></div>
+    <div><label>Zero humidity %</label><input id="zh" type="number" inputmode="decimal" value="50"></div>
+  </div>
+  <div style="margin-top:10px"><button id="btnSave">Save and send to device</button></div>
+</section>
+
+<script src="protocol.js"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const MRAD_TO_MOA = 3.43774677;
+
+// Unit tables: value_in_SI = toSI(display)   display = fromSI(SI)
+const U = {
+  imp: { range:['yd',v=>v*0.9144,v=>v/0.9144], speed:['fps',v=>v*0.3048,v=>v/0.3048], sight:['in',v=>v*0.0254,v=>v/0.0254],
+         temp:['°F',v=>(v-32)*5/9,v=>v*9/5+32], press:['inHg',v=>v*33.8639,v=>v/33.8639], wind:['mph',v=>v*0.44704,v=>v/0.44704],
+         alt:['ft',v=>v*0.3048,v=>v/0.3048], vel:['fps'] },
+  met: { range:['m',v=>v,v=>v], speed:['m/s',v=>v,v=>v], sight:['cm',v=>v/100,v=>v*100],
+         temp:['°C',v=>v,v=>v], press:['hPa',v=>v,v=>v], wind:['m/s',v=>v,v=>v],
+         alt:['m',v=>v,v=>v], vel:['m/s'] },
+};
+const unit = () => U[$('units').value];
+
+let device = null, server = null, chars = {}, demoTimer = null, demo = false;
+let lastEnv = null, sendTimer = null;
+
+function setStatus(text, cls) { const s = $('status'); s.textContent = text; s.className = 'status ' + (cls || ''); }
+
+// ---- persistence (best effort) -------------------------------------------
+const FIELDS = ['model','bc','mv','sight','zero','zt','zp','zh','range','clock','windSrc','windManual','slopeSrc','slopeManual','angUnit','units'];
+function save() { try { const o = {}; FIELDS.forEach(f => o[f] = $(f).value); localStorage.setItem('bc.v1', JSON.stringify(o)); } catch (e) {} }
+function load() { try { const o = JSON.parse(localStorage.getItem('bc.v1') || '{}'); FIELDS.forEach(f => { if (o[f] !== undefined) $(f).value = o[f]; }); } catch (e) {} }
+
+function refreshLabels() {
+  const u = unit();
+  $('lRange').textContent = 'Range (' + u.range[0] + ')';
+  $('lWind').textContent = 'Wind speed (' + u.wind[0] + ')';
+  $('lMv').textContent = 'Muzzle velocity (' + u.speed[0] + ')';
+  $('lSight').textContent = 'Sight height (' + u.sight[0] + ')';
+  $('lZero').textContent = 'Zero range (' + u.range[0] + ')';
+  $('lZt').textContent = 'Zero temperature (' + u.temp[0] + ')';
+  $('lZp').textContent = 'Zero pressure, station (' + u.press[0] + ')';
+  $('manualWindBox').classList.toggle('hide', $('windSrc').value !== 'manual');
+  $('manualSlopeBox').classList.toggle('hide', $('slopeSrc').value !== 'manual');
+  renderEnv(); renderSolution(lastSol);
+}
+
+// ---- build packets from the form -----------------------------------------
+function readConfig() {
+  const u = unit();
+  return {
+    model: $('model').value, bc: +$('bc').value,
+    muzzleMps: u.speed[1](+$('mv').value), sightHeightM: u.sight[1](+$('sight').value),
+    zeroRangeM: u.range[1](+$('zero').value), zeroTempC: u.temp[1](+$('zt').value),
+    zeroPressureHpa: u.press[1](+$('zp').value), zeroRhPct: +$('zh').value,
+  };
+}
+function readRequest() {
+  const u = unit();
+  return {
+    sensorWind: $('windSrc').value === 'sensor', imuSlope: $('slopeSrc').value === 'imu',
+    rangeM: u.range[1](+$('range').value), windClockDeg: (+$('clock').value) * 30,
+    windSpeedMps: u.wind[1](+$('windManual').value), slopeDeg: +$('slopeManual').value,
+  };
+}
+
+// ---- rendering -----------------------------------------------------------
+let lastSol = null;
+const fmt = (v, d) => (Number.isFinite(v) ? v.toFixed(d) : '--');
+function renderEnv() {
+  const e = lastEnv, u = unit();
+  if (!e) return;
+  $('eTemp').textContent = fmt(u.temp[2](e.tempC), 1) + u.temp[0];
+  $('eRh').textContent = fmt(e.rhPct, 0) + '%';
+  $('ePress').textContent = fmt(u.press[2](e.pressureHpa), u.press[0] === 'inHg' ? 2 : 1) + ' ' + u.press[0];
+  $('eWind').textContent = fmt(u.wind[2](e.windMps), 1) + ' ' + u.wind[0];
+  $('eHead').textContent = e.imuOk ? fmt(e.headingDeg, 0) + '°' : 'n/a';
+  $('ePitch').textContent = e.imuOk ? fmt(e.pitchDeg, 1) + '°' : 'n/a';
+  $('eDa').textContent = fmt(u.alt[2](e.densityAltM), 0) + ' ' + u.alt[0];
+}
+function renderSolution(s) {
+  lastSol = s;
+  if (!s) return;
+  if (!s.ok) {
+    $('outElev').textContent = 'N/A'; $('outWind').textContent = 'N/A';
+    $('outElevK').textContent = 'no solution'; $('outWindK').textContent = 'check inputs'; return;
+  }
+  const moa = $('angUnit').value === 'MOA', k = moa ? MRAD_TO_MOA : 1, name = moa ? 'MOA' : 'MIL';
+  const el = s.elevationMrad * k, wi = s.windageMrad * k, u = unit();
+  $('outElev').textContent = fmt(Math.abs(el), 2);
+  $('outElevK').textContent = (el >= 0 ? 'UP ' : 'DOWN ') + name;
+  $('outWind').textContent = fmt(Math.abs(wi), 2);
+  $('outWindK').textContent = (wi >= 0 ? 'RIGHT ' : 'LEFT ') + name;
+  $('outTof').textContent = fmt(s.tofS, 2) + ' s';
+  $('outVel').textContent = fmt(u.speed[2](s.velocityMps), 0) + ' ' + u.vel[0];
+  $('outUsed').textContent = fmt(u.wind[2](s.windMps), 1) + ' ' + u.wind[0];
+}
+
+// ---- BLE -----------------------------------------------------------------
+async function writeChar(ch, bytes) { await ch.writeValueWithResponse(bytes); }
+
+async function connect() {
+  if (!navigator.bluetooth) {
+    setStatus('Web Bluetooth not available. Use Chrome on Android, over HTTPS.', 'bad'); return;
+  }
+  try {
+    setStatus('Choose your device...', 'warn');
+    device = await navigator.bluetooth.requestDevice({ filters: [{ services: [Proto.UUID.service] }] });
+    device.addEventListener('gattserverdisconnected', () => { setStatus('Disconnected. Tap Connect to retry.', 'warn'); });
+    setStatus('Connecting...', 'warn');
+    server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(Proto.UUID.service);
+    for (const k of ['config','request','solution','env']) chars[k] = await svc.getCharacteristic(Proto.UUID[k]);
+    chars.solution.addEventListener('characteristicvaluechanged', (ev) => {
+      try { renderSolution(Proto.decodeSolution(new Uint8Array(ev.target.value.buffer))); } catch (e) { setStatus(e.message, 'bad'); }
+    });
+    chars.env.addEventListener('characteristicvaluechanged', (ev) => {
+      try { lastEnv = Proto.decodeEnv(new Uint8Array(ev.target.value.buffer)); renderEnv(); } catch (e) { setStatus(e.message, 'bad'); }
+    });
+    await chars.solution.startNotifications();
+    await chars.env.startNotifications();
+    setStatus('Connected to ' + (device.name || 'device'), 'ok');
+    await sendConfig();
+    await sendRequest();
+  } catch (e) {
+    setStatus('Connect failed: ' + e.message, 'bad');
+  }
+}
+
+async function sendConfig() {
+  const cfg = readConfig();
+  if (demo) return;
+  if (!chars.config) { setStatus('Connect first', 'warn'); return; }
+  try { await writeChar(chars.config, Proto.encodeConfig(cfg)); setStatus('Profile sent', 'ok'); }
+  catch (e) { setStatus('Send failed: ' + e.message, 'bad'); }
+}
+async function sendRequest() {
+  const req = readRequest();
+  if (demo) { renderSolution(demoSolution(req)); return; }
+  if (!chars.request) return;
+  try { await writeChar(chars.request, Proto.encodeRequest(req)); }
+  catch (e) { setStatus('Send failed: ' + e.message, 'bad'); }
+}
+function queueRequest() { clearTimeout(sendTimer); sendTimer = setTimeout(sendRequest, 250); }
+
+// ---- demo mode (fake numbers so the layout can be previewed) --------------
+function demoSolution(req) {
+  const r = req.rangeM;
+  return { ok: true, elevationMrad: 0.0000115 * r * r / 10, windageMrad: 0.003 * r / 100, tofS: r / 700,
+           velocityMps: Math.max(300, 800 - r * 0.5), windMps: req.sensorWind ? 2.2 : req.windSpeedMps };
+}
+function startDemo() {
+  demo = true; $('demoBanner').classList.remove('hide'); setStatus('Demo mode', 'warn');
+  clearInterval(demoTimer);
+  demoTimer = setInterval(() => {
+    lastEnv = { tempC: 15 + Math.random(), rhPct: 50, pressureHpa: 1013, windMps: 2 + Math.random(), headingDeg: 90,
+                pitchDeg: 0, densityAltM: 0, imuOk: true, bmeOk: true };
+    renderEnv();
+  }, 1000);
+  sendRequest();
+}
+
+// ---- offline install (needs HTTPS; silently skipped otherwise) -------------
+if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').catch(() => {}); }
+
+// ---- wiring --------------------------------------------------------------
+(function init() {
+  for (let i = 0; i < 12; i++) { const o = document.createElement('option'); o.value = i; o.textContent = (i === 0 ? 12 : i) + ' o’clock'; $('clock').appendChild(o); }
+  load(); refreshLabels();
+  $('btnConnect').onclick = () => { demo = false; $('demoBanner').classList.add('hide'); clearInterval(demoTimer); connect(); };
+  $('btnDemo').onclick = startDemo;
+  $('btnSave').onclick = async () => { save(); await sendConfig(); await sendRequest(); };
+  ['range','clock','windSrc','windManual','slopeSrc','slopeManual'].forEach(f => $(f).addEventListener('input', () => { save(); refreshLabels(); queueRequest(); }));
+  ['angUnit'].forEach(f => $(f).addEventListener('input', () => { save(); renderSolution(lastSol); }));
+  $('units').addEventListener('change', () => { convertFormUnits(); save(); refreshLabels(); });
+})();
+
+// When the unit system flips, convert the numbers on screen so they keep meaning the same thing.
+let prevUnits = $('units').value;
+function convertFormUnits() {
+  const from = U[prevUnits], to = unit();
+  const conv = (id, key, d) => { const si = from[key][1](+$(id).value); $(id).value = +to[key][2](si).toFixed(d); };
+  conv('range','range',0); conv('windManual','wind',1); conv('mv','speed',0); conv('sight','sight',1);
+  conv('zero','range',0); conv('zt','temp',0); conv('zp','press', to.press[0] === 'inHg' ? 2 : 1);
+  prevUnits = $('units').value;
+}
+</script>
+</body>
+</html>
