@@ -15,10 +15,13 @@
   h2 { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin:0 0 8px; }
   section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:12px; }
   .row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+  .gap { margin-top:8px; }
   label { display:block; font-size:12px; color:var(--dim); }
   input, select, button { width:100%; font:inherit; color:var(--fg); background:#0d100c; border:1px solid var(--line); border-radius:8px; padding:10px; }
   button { background:var(--acc); color:#10130f; font-weight:600; border:0; }
   button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); }
   .status { font-size:13px; padding:8px 10px; border-radius:8px; background:#0d100c; border:1px solid var(--line); margin-bottom:12px; }
   .status.ok { color:var(--acc); } .status.warn { color:var(--warn); } .status.bad { color:var(--bad); }
   .big { display:grid; grid-template-columns:1fr 1fr; gap:8px; text-align:center; }
@@ -31,8 +34,13 @@
   .env b { display:block; color:var(--fg); font-size:15px; }
   .demo { background:var(--warn); color:#10130f; padding:6px 10px; border-radius:8px; font-weight:600; margin-bottom:12px; text-align:center; }
   .hide { display:none; }
-  .check { display:flex; gap:8px; align-items:center; margin-top:8px; font-size:14px; color:var(--fg); }
-  .check input { width:auto; }
+  .note { font-size:12px; color:var(--dim); margin-top:6px; min-height:16px; }
+  .note.bad { color:var(--bad); } .note.warn { color:var(--warn); }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; margin-top:10px; font-size:15px; }
+  th { font-size:11px; color:var(--dim); font-weight:500; text-align:right; padding:4px 6px; border-bottom:1px solid var(--line); }
+  td { text-align:right; padding:6px; border-bottom:1px solid #20271c; }
+  th:first-child, td:first-child { text-align:left; }
+  td.up { color:var(--acc); font-weight:600; }
 </style>
 </head>
 <body>
@@ -58,6 +66,23 @@
     <div><b id="outVel">--</b>velocity</div>
     <div><b id="outUsed">--</b>wind used</div>
   </div>
+  <div id="outNote" class="note"></div>
+</section>
+
+<section>
+  <h2>Range card</h2>
+  <div class="row3">
+    <div><label id="lCardStart">Start</label><input id="cardStart" type="number" inputmode="decimal" value="100"></div>
+    <div><label id="lCardStep">Step</label><input id="cardStep" type="number" inputmode="decimal" value="100"></div>
+    <div><label>Rows (1-24)</label><input id="cardCount" type="number" inputmode="numeric" value="10"></div>
+  </div>
+  <div class="gap"><button id="btnCard" class="ghost">Refresh card</button></div>
+  <div id="cardNote" class="note"></div>
+  <table>
+    <thead><tr><th id="thRange">Range</th><th id="thUp">UP</th><th id="thWind">WIND</th><th>TOF s</th><th id="thVel">Vel</th></tr></thead>
+    <tbody id="cardBody"></tbody>
+  </table>
+  <div class="note">Uses the wind, slope and conditions below. Wind column: R means dial right.</div>
 </section>
 
 <section>
@@ -67,20 +92,40 @@
     <div><label>Wind from (clock, 12 = head, 3 = right)</label>
       <select id="clock"></select></div>
   </div>
-  <div class="row" style="margin-top:8px">
+  <div class="row gap">
     <div><label>Wind speed source</label>
       <select id="windSrc"><option value="sensor">Measured by sensor</option><option value="manual">Enter manually</option></select></div>
     <div id="manualWindBox" class="hide"><label id="lWind">Wind speed</label><input id="windManual" type="number" inputmode="decimal" value="0"></div>
   </div>
-  <div class="row" style="margin-top:8px">
+  <div class="row gap">
     <div><label>Slope source</label>
       <select id="slopeSrc"><option value="imu">Measured by sensor</option><option value="manual">Enter manually</option></select></div>
     <div id="manualSlopeBox" class="hide"><label>Slope (deg, uphill +)</label><input id="slopeManual" type="number" inputmode="decimal" value="0"></div>
   </div>
-  <div class="row" style="margin-top:8px">
+  <div class="row gap">
     <div><label>Angle units</label><select id="angUnit"><option value="MIL">MIL</option><option value="MOA">MOA</option></select></div>
     <div><label>Units</label><select id="units"><option value="imp">Imperial</option><option value="met">Metric</option></select></div>
   </div>
+</section>
+
+<section>
+  <h2>Earth effects</h2>
+  <div class="row">
+    <div><label>Spin drift</label><select id="spinOn"><option value="on">On</option><option value="off">Off</option></select></div>
+    <div><label>Coriolis</label><select id="corOn"><option value="off">Off</option><option value="on">On</option></select></div>
+  </div>
+  <div id="earthBox" class="hide">
+    <div class="row gap">
+      <div><label>Latitude (north +)</label><input id="lat" type="number" inputmode="decimal" step="0.01" placeholder="e.g. 44.25"></div>
+      <div style="display:flex;align-items:flex-end"><button id="btnGps" class="ghost">Use phone GPS</button></div>
+    </div>
+    <div class="row gap">
+      <div><label>Shooting direction</label>
+        <select id="azSrc"><option value="imu">Measured by compass</option><option value="manual">Enter manually</option></select></div>
+      <div id="azManualBox" class="hide"><label>Direction (deg, 0 = north, 90 = east)</label><input id="azManual" type="number" inputmode="decimal" value="0"></div>
+    </div>
+  </div>
+  <div id="earthNote" class="note">Spin drift needs the bullet details under Rifle and load. Coriolis is only applied to shots beyond 1000 yd (914 m).</div>
 </section>
 
 <section>
@@ -93,24 +138,49 @@
 </section>
 
 <section>
+  <h2>Saved profiles</h2>
+  <label>Profile</label>
+  <select id="profileSel"></select>
+  <div class="row gap">
+    <div><label>Name</label><input id="profileName" type="text" maxlength="40" placeholder="e.g. 6.5 CM 140gr"></div>
+    <div style="display:flex;gap:8px;align-items:flex-end">
+      <button id="btnProfSave">Save</button>
+      <button id="btnProfDel" class="danger">Delete</button>
+    </div>
+  </div>
+  <div id="profNote" class="note">Save stores the rifle and load fields below under this name. Using an existing name replaces it.</div>
+</section>
+
+<section>
   <h2>Rifle and load</h2>
   <div class="row">
     <div><label>Drag model</label><select id="model"><option>G1</option><option selected>G7</option></select></div>
     <div><label>Ballistic coefficient (lb/in²)</label><input id="bc" type="number" inputmode="decimal" step="0.001" value="0.243"></div>
   </div>
-  <div class="row" style="margin-top:8px">
+  <div class="row gap">
     <div><label id="lMv">Muzzle velocity</label><input id="mv" type="number" inputmode="decimal" value="2600"></div>
     <div><label id="lSight">Sight height</label><input id="sight" type="number" inputmode="decimal" step="0.1" value="1.5"></div>
   </div>
-  <div class="row" style="margin-top:8px">
+  <div class="row gap">
     <div><label id="lZero">Zero range</label><input id="zero" type="number" inputmode="decimal" value="100"></div>
     <div><label id="lZt">Zero temperature</label><input id="zt" type="number" inputmode="decimal" value="59"></div>
   </div>
-  <div class="row" style="margin-top:8px">
+  <div class="row gap">
     <div><label id="lZp">Zero pressure (station)</label><input id="zp" type="number" inputmode="decimal" step="0.01" value="29.92"></div>
     <div><label>Zero humidity %</label><input id="zh" type="number" inputmode="decimal" value="50"></div>
   </div>
-  <div style="margin-top:10px"><button id="btnSave">Save and send to device</button></div>
+  <h2 class="gap" style="margin-top:14px">Bullet (for spin drift, optional)</h2>
+  <div class="row">
+    <div><label>Weight (grains)</label><input id="bmass" type="number" inputmode="decimal" step="0.1" placeholder="e.g. 175"></div>
+    <div><label id="lBdia">Diameter (in)</label><input id="bdia" type="number" inputmode="decimal" step="0.001" placeholder="e.g. 0.308"></div>
+  </div>
+  <div class="row gap">
+    <div><label id="lBlen">Length (in)</label><input id="blen" type="number" inputmode="decimal" step="0.001" placeholder="e.g. 1.24"></div>
+    <div><label id="lBtw">Barrel twist: one turn in (in)</label><input id="btw" type="number" inputmode="decimal" step="0.1" placeholder="e.g. 10"></div>
+  </div>
+  <div class="gap"><label>Twist direction</label><select id="btdir"><option value="R">Right-hand (most rifles)</option><option value="L">Left-hand</option></select></div>
+  <div class="gap"><button id="btnSave">Send to device</button></div>
+  <div id="cfgNote" class="note"></div>
 </section>
 
 <script src="protocol.js"></script>
@@ -118,43 +188,39 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
 const MRAD_TO_MOA = 3.43774677;
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const bytesOf = (dv) => new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
 
-// Unit tables: value_in_SI = toSI(display)   display = fromSI(SI)
+// Unit tables: [label, toSI, fromSI]
 const U = {
   imp: { range:['yd',v=>v*0.9144,v=>v/0.9144], speed:['fps',v=>v*0.3048,v=>v/0.3048], sight:['in',v=>v*0.0254,v=>v/0.0254],
          temp:['°F',v=>(v-32)*5/9,v=>v*9/5+32], press:['inHg',v=>v*33.8639,v=>v/33.8639], wind:['mph',v=>v*0.44704,v=>v/0.44704],
-         alt:['ft',v=>v*0.3048,v=>v/0.3048], vel:['fps'] },
+         alt:['ft',v=>v*0.3048,v=>v/0.3048], dim:['in',v=>v*0.0254,v=>v/0.0254], vel:['fps'] },
   met: { range:['m',v=>v,v=>v], speed:['m/s',v=>v,v=>v], sight:['cm',v=>v/100,v=>v*100],
          temp:['°C',v=>v,v=>v], press:['hPa',v=>v,v=>v], wind:['m/s',v=>v,v=>v],
-         alt:['m',v=>v,v=>v], vel:['m/s'] },
+         alt:['m',v=>v,v=>v], dim:['mm',v=>v/1000,v=>v*1000], vel:['m/s'] },
 };
 const unit = () => U[$('units').value];
 
 let device = null, server = null, chars = {}, demoTimer = null, demo = false;
-let lastEnv = null, sendTimer = null;
+let lastEnv = null, sendTimer = null, cardTimer = null, cardWait = null, delArm = null;
+let lastSol = null, cardRows = [];
+const MAX_ROWS = 24;
 
 function setStatus(text, cls) { const s = $('status'); s.textContent = text; s.className = 'status ' + (cls || ''); }
+function setNote(id, text, cls) { const n = $(id); n.textContent = text; n.className = 'note' + (cls ? ' ' + cls : ''); }
+const isConnected = () => !demo && !!(device && device.gatt && device.gatt.connected && chars.config);
 
-// ---- persistence (best effort) -------------------------------------------
-const FIELDS = ['model','bc','mv','sight','zero','zt','zp','zh','range','clock','windSrc','windManual','slopeSrc','slopeManual','angUnit','units'];
+// ---- form persistence (best effort) ---------------------------------------
+const FIELDS = ['model','bc','mv','sight','zero','zt','zp','zh','range','clock','windSrc','windManual','slopeSrc','slopeManual',
+                'angUnit','units','cardStart','cardStep','cardCount',
+                'bmass','bdia','blen','btw','btdir','spinOn','corOn','lat','azSrc','azManual'];
 function save() { try { const o = {}; FIELDS.forEach(f => o[f] = $(f).value); localStorage.setItem('bc.v1', JSON.stringify(o)); } catch (e) {} }
 function load() { try { const o = JSON.parse(localStorage.getItem('bc.v1') || '{}'); FIELDS.forEach(f => { if (o[f] !== undefined) $(f).value = o[f]; }); } catch (e) {} }
 
-function refreshLabels() {
-  const u = unit();
-  $('lRange').textContent = 'Range (' + u.range[0] + ')';
-  $('lWind').textContent = 'Wind speed (' + u.wind[0] + ')';
-  $('lMv').textContent = 'Muzzle velocity (' + u.speed[0] + ')';
-  $('lSight').textContent = 'Sight height (' + u.sight[0] + ')';
-  $('lZero').textContent = 'Zero range (' + u.range[0] + ')';
-  $('lZt').textContent = 'Zero temperature (' + u.temp[0] + ')';
-  $('lZp').textContent = 'Zero pressure, station (' + u.press[0] + ')';
-  $('manualWindBox').classList.toggle('hide', $('windSrc').value !== 'manual');
-  $('manualSlopeBox').classList.toggle('hide', $('slopeSrc').value !== 'manual');
-  renderEnv(); renderSolution(lastSol);
-}
+const num = (id) => (String($(id).value).trim() === '' ? 0 : +$(id).value);
 
-// ---- build packets from the form -----------------------------------------
+// ---- reading the form (everything is converted to SI for the device) ----------
 function readConfig() {
   const u = unit();
   return {
@@ -162,6 +228,8 @@ function readConfig() {
     muzzleMps: u.speed[1](+$('mv').value), sightHeightM: u.sight[1](+$('sight').value),
     zeroRangeM: u.range[1](+$('zero').value), zeroTempC: u.temp[1](+$('zt').value),
     zeroPressureHpa: u.press[1](+$('zp').value), zeroRhPct: +$('zh').value,
+    massGr: num('bmass'), diameterM: u.dim[1](num('bdia')), lengthM: u.dim[1](num('blen')),
+    twistM: ($('btdir').value === 'L' ? -1 : 1) * u.dim[1](num('btw')),
   };
 }
 function readRequest() {
@@ -170,12 +238,132 @@ function readRequest() {
     sensorWind: $('windSrc').value === 'sensor', imuSlope: $('slopeSrc').value === 'imu',
     rangeM: u.range[1](+$('range').value), windClockDeg: (+$('clock').value) * 30,
     windSpeedMps: u.wind[1](+$('windManual').value), slopeDeg: +$('slopeManual').value,
+    spinDrift: $('spinOn').value === 'on', coriolis: $('corOn').value === 'on',
+    imuAzimuth: $('azSrc').value === 'imu', latitudeDeg: $('corOn').value === 'on' ? num('lat') : 0,
+    azimuthDeg: num('azManual'),
   };
 }
+function readCard() {
+  const u = unit(), r = readRequest();
+  const count = Math.round(+$('cardCount').value);
+  return Object.assign({}, r, { count, startM: u.range[1](+$('cardStart').value), stepM: u.range[1](+$('cardStep').value) });
+}
 
-// ---- rendering -----------------------------------------------------------
-let lastSol = null;
+// Same limits the board enforces, so mistakes are caught here with a readable message.
+function validateConfig(c) {
+  const f = Number.isFinite;
+  if (![c.bc, c.muzzleMps, c.sightHeightM, c.zeroRangeM, c.zeroTempC, c.zeroPressureHpa, c.zeroRhPct].every(f)) return 'Fill in every rifle and load field.';
+  if (!(c.bc > 0.01 && c.bc < 2)) return 'Ballistic coefficient should be between 0.01 and 2.';
+  if (!(c.muzzleMps > 100 && c.muzzleMps < 1500)) return 'Muzzle velocity looks wrong.';
+  if (!(c.sightHeightM > 0 && c.sightHeightM < 0.3)) return 'Sight height should be above 0 and under 30 cm (12 in).';
+  if (!(c.zeroRangeM >= 10 && c.zeroRangeM < 1000)) return 'Zero range should be 10 m to 1000 m.';
+  if (!(c.zeroTempC > -60 && c.zeroTempC < 70)) return 'Zero temperature looks wrong.';
+  if (!(c.zeroPressureHpa > 300 && c.zeroPressureHpa < 1100)) return 'Zero pressure looks wrong (use station pressure).';
+  if (!(c.zeroRhPct >= 0 && c.zeroRhPct <= 100)) return 'Humidity should be 0 to 100.';
+  return validateBullet(c);
+}
+// Bullet data is optional, but it is all or nothing, and the limits match the board's.
+function hasBullet(c) { return !!(c.massGr || c.diameterM || c.lengthM || c.twistM); }
+function bulletComplete(c) { return c.massGr > 0 && c.diameterM > 0 && c.lengthM > 0 && c.twistM !== 0; }
+function validateBullet(c) {
+  if (!hasBullet(c)) return null;
+  if (![c.massGr, c.diameterM, c.lengthM, c.twistM].every(Number.isFinite) || !bulletComplete(c)) return 'Fill in all four bullet fields for spin drift, or clear them all.';
+  if (!(c.massGr >= 10 && c.massGr <= 1000)) return 'Bullet weight should be 10 to 1000 grains.';
+  if (!(c.diameterM >= 0.0025 && c.diameterM <= 0.02)) return 'Bullet diameter looks wrong (a .308 is 0.308 in).';
+  if (!(c.lengthM >= 1.5 * c.diameterM && c.lengthM <= 8 * c.diameterM)) return 'Bullet length should be 1.5 to 8 calibers (a 175 gr .308 is about 1.24 in).';
+  const tw = Math.abs(c.twistM);
+  if (!(tw >= 5 * c.diameterM && tw <= 150 * c.diameterM)) return 'Twist looks wrong (1:10 means one turn in 10 in).';
+  return null;
+}
+// Latitude and direction are only needed when Coriolis is on.
+function earthError(r) {
+  if (!r.coriolis) return null;
+  if (String($('lat').value).trim() === '' || !Number.isFinite(r.latitudeDeg) || Math.abs(r.latitudeDeg) > 90) return 'Enter your latitude (or tap Use phone GPS) for Coriolis.';
+  if (!r.imuAzimuth && (!Number.isFinite(r.azimuthDeg) || r.azimuthDeg < -360 || r.azimuthDeg > 720)) return 'Enter the shooting direction in degrees.';
+  return null;
+}
+function validateCard(c) {
+  if (!Number.isFinite(c.startM) || !Number.isFinite(c.stepM) || !Number.isFinite(c.count)) return 'Fill in start, step and rows.';
+  if (c.count < 1 || c.count > MAX_ROWS) return 'Rows must be 1 to ' + MAX_ROWS + '.';
+  if (c.startM < 10) return 'Start range is too short.';
+  if (c.stepM < 1) return 'Step is too small.';
+  if (c.startM + c.stepM * (c.count - 1) > 2000) return 'Card would run past 2000 m. Lower the step or row count.';
+  return null;
+}
+
+// ---- profiles -----------------------------------------------------------------
+// Stored in SI units, so switching imperial/metric never corrupts a saved load.
+const PKEY = 'bc.profiles.v1';
+let profiles = { active: null, list: [] };
+function loadProfiles() {
+  try { const o = JSON.parse(localStorage.getItem(PKEY) || 'null'); if (o && Array.isArray(o.list)) profiles = { active: o.active || null, list: o.list }; } catch (e) {}
+}
+function persistProfiles() { try { localStorage.setItem(PKEY, JSON.stringify(profiles)); } catch (e) {} }
+const activeProfile = () => profiles.list.find(p => p.id === profiles.active) || null;
+
+function cfgClose(a, b) {
+  return a.model === b.model && Math.abs(a.bc - b.bc) < 5e-4 && Math.abs(a.muzzleMps - b.muzzleMps) < 0.5 &&
+    Math.abs(a.sightHeightM - b.sightHeightM) < 1e-3 && Math.abs(a.zeroRangeM - b.zeroRangeM) < 1 &&
+    Math.abs(a.zeroTempC - b.zeroTempC) < 0.6 && Math.abs(a.zeroPressureHpa - b.zeroPressureHpa) < 0.5 &&
+    Math.abs(a.zeroRhPct - b.zeroRhPct) < 1 &&
+    Math.abs((a.massGr || 0) - (b.massGr || 0)) < 0.05 && Math.abs((a.diameterM || 0) - (b.diameterM || 0)) < 1e-5 &&
+    Math.abs((a.lengthM || 0) - (b.lengthM || 0)) < 1e-4 && Math.abs((a.twistM || 0) - (b.twistM || 0)) < 1e-4;
+}
+function applyConfig(c) {
+  const u = unit();
+  $('model').value = c.model; $('bc').value = +c.bc.toFixed(3);
+  $('mv').value = +u.speed[2](c.muzzleMps).toFixed(0); $('sight').value = +u.sight[2](c.sightHeightM).toFixed(1);
+  $('zero').value = +u.range[2](c.zeroRangeM).toFixed(0); $('zt').value = +u.temp[2](c.zeroTempC).toFixed(0);
+  $('zp').value = +u.press[2](c.zeroPressureHpa).toFixed(u.press[0] === 'inHg' ? 2 : 1); $('zh').value = +c.zeroRhPct.toFixed(0);
+  const dd = u.dim[0] === 'in' ? 3 : 2, put = (id, v, d) => { $(id).value = v ? +v.toFixed(d) : ''; };
+  put('bmass', c.massGr || 0, 1); put('bdia', u.dim[2](c.diameterM || 0), dd); put('blen', u.dim[2](c.lengthM || 0), dd);
+  put('btw', u.dim[2](Math.abs(c.twistM || 0)), 1);
+  $('btdir').value = (c.twistM || 0) < 0 ? 'L' : 'R';
+}
+function renderProfiles() {
+  const sel = $('profileSel');
+  sel.innerHTML = '<option value="">(not saved)</option>' + profiles.list.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  sel.value = profiles.active || '';
+  const ap = activeProfile();
+  if (ap && !cfgClose(readConfig(), ap.cfg)) setNote('profNote', 'Edited since saved. Tap Save to keep the changes, or pick the profile again to undo them.', 'warn');
+  else if (ap) setNote('profNote', 'Profile loaded.', '');
+  else setNote('profNote', 'Save stores the rifle and load fields below under this name. Using an existing name replaces it.', '');
+}
+function saveProfile(name) {
+  name = String(name || '').trim();
+  if (!name) return { ok: false, msg: 'Type a name first.' };
+  const cfg = readConfig(), err = validateConfig(cfg);
+  if (err) return { ok: false, msg: err };
+  let p = profiles.list.find(x => x.name.toLowerCase() === name.toLowerCase());
+  if (p) { p.cfg = cfg; p.name = name; }
+  else { p = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name, cfg }; profiles.list.push(p); }
+  profiles.list.sort((a, b) => a.name.localeCompare(b.name));
+  profiles.active = p.id;
+  persistProfiles(); renderProfiles(); $('profileName').value = name;
+  setNote('profNote', 'Saved "' + name + '".', '');
+  return { ok: true, id: p.id };
+}
+function selectProfile(id) {
+  const p = profiles.list.find(x => x.id === id);
+  profiles.active = p ? p.id : null;
+  persistProfiles();
+  if (p) { applyConfig(p.cfg); $('profileName').value = p.name; save(); }
+  renderProfiles();
+  return !!p;
+}
+function deleteProfile(id) {
+  const i = profiles.list.findIndex(x => x.id === id);
+  if (i < 0) return false;
+  profiles.list.splice(i, 1);
+  if (profiles.active === id) profiles.active = null;
+  persistProfiles(); renderProfiles();
+  return true;
+}
+
+// ---- rendering --------------------------------------------------------------------
 const fmt = (v, d) => (Number.isFinite(v) ? v.toFixed(d) : '--');
+function angle() { const moa = $('angUnit').value === 'MOA'; return { k: moa ? MRAD_TO_MOA : 1, name: moa ? 'MOA' : 'MIL' }; }
+
 function renderEnv() {
   const e = lastEnv, u = unit();
   if (!e) return;
@@ -194,19 +382,70 @@ function renderSolution(s) {
     $('outElev').textContent = 'N/A'; $('outWind').textContent = 'N/A';
     $('outElevK').textContent = 'no solution'; $('outWindK').textContent = 'check inputs'; return;
   }
-  const moa = $('angUnit').value === 'MOA', k = moa ? MRAD_TO_MOA : 1, name = moa ? 'MOA' : 'MIL';
-  const el = s.elevationMrad * k, wi = s.windageMrad * k, u = unit();
+  const a = angle(), el = s.elevationMrad * a.k, wi = s.windageMrad * a.k, u = unit();
   $('outElev').textContent = fmt(Math.abs(el), 2);
-  $('outElevK').textContent = (el >= 0 ? 'UP ' : 'DOWN ') + name;
+  $('outElevK').textContent = (el >= 0 ? 'UP ' : 'DOWN ') + a.name;
   $('outWind').textContent = fmt(Math.abs(wi), 2);
-  $('outWindK').textContent = (wi >= 0 ? 'RIGHT ' : 'LEFT ') + name;
+  $('outWindK').textContent = (wi >= 0 ? 'RIGHT ' : 'LEFT ') + a.name;
   $('outTof').textContent = fmt(s.tofS, 2) + ' s';
   $('outVel').textContent = fmt(u.speed[2](s.velocityMps), 0) + ' ' + u.vel[0];
   $('outUsed').textContent = fmt(u.wind[2](s.windMps), 1) + ' ' + u.wind[0];
+  const sd = (s.spinDriftMrad || 0) * a.k;
+  $('outNote').textContent = Math.abs(sd) >= 0.005 ? 'Windage includes ' + fmt(Math.abs(sd), 2) + ' ' + a.name + (sd < 0 ? ' left' : ' right') + ' for spin drift' : '';
+}
+function renderCard() {
+  const u = unit(), a = angle();
+  $('thRange').textContent = 'Range ' + u.range[0];
+  $('thUp').textContent = 'UP ' + a.name;
+  $('thWind').textContent = 'WIND ' + a.name;
+  $('thVel').textContent = 'Vel ' + u.vel[0];
+  $('cardBody').innerHTML = cardRows.filter(Boolean).map(s => {
+    if (!s.ok) return `<tr><td>${fmt(u.range[2](s.rangeM), 0)}</td><td colspan="4">no solution</td></tr>`;
+    const up = s.elevationMrad * a.k, wi = s.windageMrad * a.k;
+    return `<tr><td>${fmt(u.range[2](s.rangeM), 0)}</td><td class="up">${fmt(up, 2)}</td>` +
+      `<td>${wi >= 0 ? 'R' : 'L'}${fmt(Math.abs(wi), 2)}</td><td>${fmt(s.tofS, 2)}</td><td>${fmt(u.speed[2](s.velocityMps), 0)}</td></tr>`;
+  }).join('');
+}
+function refreshLabels() {
+  const u = unit();
+  $('lRange').textContent = 'Range (' + u.range[0] + ')';
+  $('lWind').textContent = 'Wind speed (' + u.wind[0] + ')';
+  $('lMv').textContent = 'Muzzle velocity (' + u.speed[0] + ')';
+  $('lSight').textContent = 'Sight height (' + u.sight[0] + ')';
+  $('lZero').textContent = 'Zero range (' + u.range[0] + ')';
+  $('lZt').textContent = 'Zero temperature (' + u.temp[0] + ')';
+  $('lZp').textContent = 'Zero pressure, station (' + u.press[0] + ')';
+  $('lBdia').textContent = 'Diameter (' + u.dim[0] + ')';
+  $('lBlen').textContent = 'Length (' + u.dim[0] + ')';
+  $('lBtw').textContent = 'Barrel twist: one turn in (' + u.dim[0] + ')';
+  $('earthBox').classList.toggle('hide', $('corOn').value !== 'on');
+  $('azManualBox').classList.toggle('hide', $('azSrc').value === 'imu');
+  updateEarthNote();
+  $('lCardStart').textContent = 'Start (' + u.range[0] + ')';
+  $('lCardStep').textContent = 'Step (' + u.range[0] + ')';
+  $('manualWindBox').classList.toggle('hide', $('windSrc').value !== 'manual');
+  $('manualSlopeBox').classList.toggle('hide', $('slopeSrc').value === 'imu');
+  renderEnv(); renderSolution(lastSol); renderCard(); renderProfiles();
 }
 
-// ---- BLE -----------------------------------------------------------------
+function updateEarthNote() {
+  const err = earthError(readRequest());
+  if (err) setNote('earthNote', err, 'bad');
+  else if ($('spinOn').value === 'on' && !bulletComplete(readConfig())) setNote('earthNote', 'Spin drift is on but needs bullet weight, diameter, length and twist (Rifle and load).', 'warn');
+  else setNote('earthNote', 'Spin drift needs the bullet details under Rifle and load. Coriolis is only applied to shots beyond 1000 yd (914 m).', '');
+}
+
+// ---- BLE ------------------------------------------------------------------------
 async function writeChar(ch, bytes) { await ch.writeValueWithResponse(bytes); }
+
+function onSolution(s) {
+  if (s.row === 0) { renderSolution(s); return; }
+  if (s.row < 1 || s.row > cardRows.length) return;       // stale row from an earlier sweep
+  cardRows[s.row - 1] = s;
+  if (!s.ok) setNote('cardNote', 'The board could not solve this card. Check the profile and ranges.', 'bad');
+  else if (cardRows.filter(Boolean).length === cardRows.length) { clearTimeout(cardWait); setNote('cardNote', '', ''); }
+  renderCard();
+}
 
 async function connect() {
   if (!navigator.bluetooth) {
@@ -219,40 +458,65 @@ async function connect() {
     setStatus('Connecting...', 'warn');
     server = await device.gatt.connect();
     const svc = await server.getPrimaryService(Proto.UUID.service);
-    for (const k of ['config','request','solution','env']) chars[k] = await svc.getCharacteristic(Proto.UUID[k]);
+    for (const k of ['config','request','card','solution','env']) chars[k] = await svc.getCharacteristic(Proto.UUID[k]);
     chars.solution.addEventListener('characteristicvaluechanged', (ev) => {
-      try { renderSolution(Proto.decodeSolution(new Uint8Array(ev.target.value.buffer))); } catch (e) { setStatus(e.message, 'bad'); }
+      try { onSolution(Proto.decodeSolution(bytesOf(ev.target.value))); } catch (e) { setStatus(e.message, 'bad'); }
     });
     chars.env.addEventListener('characteristicvaluechanged', (ev) => {
-      try { lastEnv = Proto.decodeEnv(new Uint8Array(ev.target.value.buffer)); renderEnv(); } catch (e) { setStatus(e.message, 'bad'); }
+      try { lastEnv = Proto.decodeEnv(bytesOf(ev.target.value)); renderEnv(); } catch (e) { setStatus(e.message, 'bad'); }
     });
     await chars.solution.startNotifications();
     await chars.env.startNotifications();
     setStatus('Connected to ' + (device.name || 'device'), 'ok');
-    await sendConfig();
-    await sendRequest();
+    if (await sendConfig()) { await sendRequest(); await requestCard(); }
   } catch (e) {
     setStatus('Connect failed: ' + e.message, 'bad');
   }
 }
 
 async function sendConfig() {
-  const cfg = readConfig();
-  if (demo) return;
-  if (!chars.config) { setStatus('Connect first', 'warn'); return; }
-  try { await writeChar(chars.config, Proto.encodeConfig(cfg)); setStatus('Profile sent', 'ok'); }
-  catch (e) { setStatus('Send failed: ' + e.message, 'bad'); }
+  const cfg = readConfig(), err = validateConfig(cfg);
+  if (err) { setNote('cfgNote', err, 'bad'); return false; }
+  setNote('cfgNote', '', '');
+  if (demo) return true;
+  if (!isConnected()) { setStatus('Connect first', 'warn'); return false; }
+  try { await writeChar(chars.config, Proto.encodeConfig(cfg)); setStatus('Profile sent', 'ok'); return true; }
+  catch (e) { setStatus('Send failed: ' + e.message, 'bad'); return false; }
 }
 async function sendRequest() {
-  const req = readRequest();
+  const req = readRequest(), eerr = earthError(req);
+  if (eerr) { updateEarthNote(); return; }
   if (demo) { renderSolution(demoSolution(req)); return; }
-  if (!chars.request) return;
+  if (!isConnected()) return;
   try { await writeChar(chars.request, Proto.encodeRequest(req)); }
   catch (e) { setStatus('Send failed: ' + e.message, 'bad'); }
 }
+async function requestCard() {
+  const c = readCard(), err = validateCard(c) || earthError(c);
+  if (err) { setNote('cardNote', err, 'bad'); return; }
+  cardRows = new Array(c.count).fill(null);
+  renderCard();
+  if (demo) {
+    for (let i = 0; i < c.count; i++) {
+      const r = c.startM + c.stepM * i;
+      cardRows[i] = Object.assign(demoSolution(Object.assign({}, c, { rangeM: r })), { row: i + 1, rangeM: r });
+    }
+    setNote('cardNote', '', ''); renderCard(); return;
+  }
+  if (!isConnected()) { setNote('cardNote', 'Connect to build a card.', 'warn'); return; }
+  setNote('cardNote', 'Waiting for the board...', '');
+  try { await writeChar(chars.card, Proto.encodeCard(c)); }
+  catch (e) { setNote('cardNote', 'Send failed: ' + e.message, 'bad'); return; }
+  clearTimeout(cardWait);
+  cardWait = setTimeout(() => {
+    const n = cardRows.filter(Boolean).length;
+    if (n < cardRows.length) setNote('cardNote', 'Got ' + n + ' of ' + cardRows.length + ' rows. Tap Refresh card to try again.', 'warn');
+  }, 6000);
+}
 function queueRequest() { clearTimeout(sendTimer); sendTimer = setTimeout(sendRequest, 250); }
+function queueCard() { clearTimeout(cardTimer); cardTimer = setTimeout(requestCard, 700); }
 
-// ---- demo mode (fake numbers so the layout can be previewed) --------------
+// ---- demo mode (fake numbers so the layout can be previewed) ----------------------------
 function demoSolution(req) {
   const r = req.rangeM;
   return { ok: true, elevationMrad: 0.0000115 * r * r / 10, windageMrad: 0.003 * r / 100, tofS: r / 700,
@@ -266,31 +530,75 @@ function startDemo() {
                 pitchDeg: 0, densityAltM: 0, imuOk: true, bmeOk: true };
     renderEnv();
   }, 1000);
-  sendRequest();
+  sendRequest(); requestCard();
 }
 
-// ---- offline install (needs HTTPS; silently skipped otherwise) -------------
+// ---- offline install (needs HTTPS; silently skipped otherwise) ---------------------------
 if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').catch(() => {}); }
 
-// ---- wiring --------------------------------------------------------------
+// ---- wiring --------------------------------------------------------------------------------
 (function init() {
   for (let i = 0; i < 12; i++) { const o = document.createElement('option'); o.value = i; o.textContent = (i === 0 ? 12 : i) + ' o’clock'; $('clock').appendChild(o); }
-  load(); refreshLabels();
+  load(); loadProfiles(); refreshLabels();
+  const ap = activeProfile();
+  if (ap) $('profileName').value = ap.name;
+
   $('btnConnect').onclick = () => { demo = false; $('demoBanner').classList.add('hide'); clearInterval(demoTimer); connect(); };
   $('btnDemo').onclick = startDemo;
-  $('btnSave').onclick = async () => { save(); await sendConfig(); await sendRequest(); };
-  ['range','clock','windSrc','windManual','slopeSrc','slopeManual'].forEach(f => $(f).addEventListener('input', () => { save(); refreshLabels(); queueRequest(); }));
-  ['angUnit'].forEach(f => $(f).addEventListener('input', () => { save(); renderSolution(lastSol); }));
+  $('btnSave').onclick = async () => { save(); if (await sendConfig()) { await sendRequest(); await requestCard(); } };
+  $('btnCard').onclick = () => { save(); requestCard(); };
+
+  // Profiles
+  $('profileSel').addEventListener('change', async () => {
+    if (!selectProfile($('profileSel').value)) { $('profileName').value = ''; return; }
+    if (demo || isConnected()) { if (await sendConfig()) { await sendRequest(); await requestCard(); } }
+  });
+  $('btnProfSave').onclick = () => {
+    const r = saveProfile($('profileName').value);
+    if (!r.ok) setNote('profNote', r.msg, 'bad');
+  };
+  $('btnProfDel').onclick = () => {
+    const id = profiles.active;
+    if (!id) { setNote('profNote', 'Pick a saved profile to delete.', 'warn'); return; }
+    if (delArm !== id) {                                           // two taps so a stray touch can't delete a load
+      delArm = id; $('btnProfDel').textContent = 'Tap again';
+      setTimeout(() => { delArm = null; $('btnProfDel').textContent = 'Delete'; }, 3000); return;
+    }
+    delArm = null; $('btnProfDel').textContent = 'Delete';
+    const name = (activeProfile() || {}).name; deleteProfile(id); $('profileName').value = '';
+    setNote('profNote', 'Deleted "' + name + '".', '');
+  };
+  ['model','bc','mv','sight','zero','zt','zp','zh'].forEach(f => $(f).addEventListener('input', () => { save(); renderProfiles(); }));
+
+  ['range','clock','windSrc','windManual','slopeSrc','slopeManual'].forEach(f => $(f).addEventListener('input', () => { save(); refreshLabels(); queueRequest(); queueCard(); }));
+  ['spinOn','corOn','lat','azSrc','azManual'].forEach(f => $(f).addEventListener('input', () => { save(); refreshLabels(); queueRequest(); queueCard(); }));
+  ['bmass','bdia','blen','btw','btdir'].forEach(f => $(f).addEventListener('input', () => { save(); renderProfiles(); refreshLabels(); }));
+  $('btnGps').onclick = () => {
+    if (!navigator.geolocation) { setNote('earthNote', 'This browser has no GPS access. Type your latitude instead.', 'bad'); return; }
+    setNote('earthNote', 'Getting your position...', '');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { $('lat').value = pos.coords.latitude.toFixed(2); save(); setNote('earthNote', 'Latitude set from GPS.', ''); queueRequest(); queueCard(); },
+      (err) => setNote('earthNote', 'Could not get location (' + err.message + '). Type your latitude instead.', 'bad'),
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 });
+  };
+  ['cardStart','cardStep','cardCount'].forEach(f => $(f).addEventListener('input', () => { save(); queueCard(); }));
+  $('angUnit').addEventListener('input', () => { save(); renderSolution(lastSol); renderCard(); });
   $('units').addEventListener('change', () => { convertFormUnits(); save(); refreshLabels(); });
+
+  // Keep the card fresh as conditions drift (only when a card is on screen and we are connected).
+  setInterval(() => { if (isConnected() && cardRows.some(Boolean)) requestCard(); }, 30000);
 })();
 
 // When the unit system flips, convert the numbers on screen so they keep meaning the same thing.
 let prevUnits = $('units').value;
 function convertFormUnits() {
   const from = U[prevUnits], to = unit();
-  const conv = (id, key, d) => { const si = from[key][1](+$(id).value); $(id).value = +to[key][2](si).toFixed(d); };
+  const conv = (id, key, d) => { if (String($(id).value).trim() === '') return; const si = from[key][1](+$(id).value); $(id).value = +to[key][2](si).toFixed(d); };
   conv('range','range',0); conv('windManual','wind',1); conv('mv','speed',0); conv('sight','sight',1);
   conv('zero','range',0); conv('zt','temp',0); conv('zp','press', to.press[0] === 'inHg' ? 2 : 1);
+  conv('cardStart','range',0); conv('cardStep','range',0);
+  const dd = to.dim[0] === 'in' ? 3 : 2;
+  conv('bdia','dim',dd); conv('blen','dim',dd); conv('btw','dim',dd === 3 ? 1 : 1);
   prevUnits = $('units').value;
 }
 </script>
