@@ -18,11 +18,12 @@
   const FLAG_CORIOLIS = 0x04;
   const FLAG_SPIN_DRIFT = 0x08;
   const FLAG_IMU_AZIMUTH = 0x10;
+  const FLAG_AERO_JUMP = 0x20;
 
   // flags shared by request and card
   function flagsOf(o) {
     return (o.sensorWind ? FLAG_SENSOR_WIND : 0) | (o.imuSlope ? FLAG_IMU_SLOPE : 0) |
-      (o.coriolis ? FLAG_CORIOLIS : 0) | (o.spinDrift ? FLAG_SPIN_DRIFT : 0) | (o.imuAzimuth ? FLAG_IMU_AZIMUTH : 0);
+      (o.coriolis ? FLAG_CORIOLIS : 0) | (o.spinDrift ? FLAG_SPIN_DRIFT : 0) | (o.imuAzimuth ? FLAG_IMU_AZIMUTH : 0) | (o.aeroJump ? FLAG_AERO_JUMP : 0);
   }
 
   function view(bytes) {
@@ -51,7 +52,7 @@
     return b;
   }
 
-  // req: {sensorWind, imuSlope, coriolis, spinDrift, imuAzimuth (bools), rangeM, windClockDeg,
+  // req: {sensorWind, imuSlope, coriolis, spinDrift, imuAzimuth, aeroJump (bools), rangeM, windClockDeg,
   //       windSpeedMps, slopeDeg, latitudeDeg, azimuthDeg}
   function encodeRequest(req) {
     const b = new Uint8Array(28), v = view(b);

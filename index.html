@@ -99,7 +99,7 @@
   </div>
   <div class="row gap">
     <div><label>Slope source</label>
-      <select id="slopeSrc"><option value="imu">Measured by sensor</option><option value="manual">Enter manually</option></select></div>
+      <select id="slopeSrc"><option value="manual" selected>Enter manually</option><option value="imu" disabled>Measured by sensor (version 2)</option></select></div>
     <div id="manualSlopeBox" class="hide"><label>Slope (deg, uphill +)</label><input id="slopeManual" type="number" inputmode="decimal" value="0"></div>
   </div>
   <div class="row gap">
@@ -114,6 +114,9 @@
     <div><label>Spin drift</label><select id="spinOn"><option value="on">On</option><option value="off">Off</option></select></div>
     <div><label>Coriolis</label><select id="corOn"><option value="off">Off</option><option value="on">On</option></select></div>
   </div>
+  <div class="row gap">
+    <div><label>Aerodynamic jump</label><select id="aeroOn"><option value="on">On</option><option value="off">Off</option></select></div>
+  </div>
   <div id="earthBox" class="hide">
     <div class="row gap">
       <div><label>Latitude (north +)</label><input id="lat" type="number" inputmode="decimal" step="0.01" placeholder="e.g. 44.25"></div>
@@ -121,11 +124,11 @@
     </div>
     <div class="row gap">
       <div><label>Shooting direction</label>
-        <select id="azSrc"><option value="imu">Measured by compass</option><option value="manual">Enter manually</option></select></div>
+        <select id="azSrc"><option value="manual" selected>Enter manually</option><option value="imu" disabled>Measured by compass (version 2)</option></select></div>
       <div id="azManualBox" class="hide"><label>Direction (deg, 0 = north, 90 = east)</label><input id="azManual" type="number" inputmode="decimal" value="0"></div>
     </div>
   </div>
-  <div id="earthNote" class="note">Spin drift needs the bullet details under Rifle and load. Coriolis is only applied to shots beyond 1000 yd (914 m).</div>
+  <div id="earthNote" class="note">Spin drift and aerodynamic jump need the bullet details under Rifle and load. Coriolis is only applied to shots beyond 1000 yd (914 m).</div>
 </section>
 
 <section>
@@ -214,7 +217,14 @@ const isConnected = () => !demo && !!(device && device.gatt && device.gatt.conne
 // ---- form persistence (best effort) ---------------------------------------
 const FIELDS = ['model','bc','mv','sight','zero','zt','zp','zh','range','clock','windSrc','windManual','slopeSrc','slopeManual',
                 'angUnit','units','cardStart','cardStep','cardCount',
-                'bmass','bdia','blen','btw','btdir','spinOn','corOn','lat','azSrc','azManual'];
+                'bmass','bdia','blen','btw','btdir','spinOn','aeroOn','corOn','lat','azSrc','azManual'];
+// This handheld has no tilt/compass sensor (the BNO085 comes with the rifle unit in version 2),
+// so slope and shooting direction are always typed in. This also fixes older saved settings.
+const HAS_ORIENTATION_SENSOR = false;
+function enforceManualOrientation() {
+  if (HAS_ORIENTATION_SENSOR) return;
+  $('slopeSrc').value = 'manual'; $('azSrc').value = 'manual';
+}
 function save() { try { const o = {}; FIELDS.forEach(f => o[f] = $(f).value); localStorage.setItem('bc.v1', JSON.stringify(o)); } catch (e) {} }
 function load() { try { const o = JSON.parse(localStorage.getItem('bc.v1') || '{}'); FIELDS.forEach(f => { if (o[f] !== undefined) $(f).value = o[f]; }); } catch (e) {} }
 
@@ -235,11 +245,11 @@ function readConfig() {
 function readRequest() {
   const u = unit();
   return {
-    sensorWind: $('windSrc').value === 'sensor', imuSlope: $('slopeSrc').value === 'imu',
+    sensorWind: $('windSrc').value === 'sensor', imuSlope: HAS_ORIENTATION_SENSOR && $('slopeSrc').value === 'imu',
     rangeM: u.range[1](+$('range').value), windClockDeg: (+$('clock').value) * 30,
     windSpeedMps: u.wind[1](+$('windManual').value), slopeDeg: +$('slopeManual').value,
-    spinDrift: $('spinOn').value === 'on', coriolis: $('corOn').value === 'on',
-    imuAzimuth: $('azSrc').value === 'imu', latitudeDeg: $('corOn').value === 'on' ? num('lat') : 0,
+    spinDrift: $('spinOn').value === 'on', aeroJump: $('aeroOn').value === 'on', coriolis: $('corOn').value === 'on',
+    imuAzimuth: HAS_ORIENTATION_SENSOR && $('azSrc').value === 'imu', latitudeDeg: $('corOn').value === 'on' ? num('lat') : 0,
     azimuthDeg: num('azManual'),
   };
 }
@@ -431,8 +441,8 @@ function refreshLabels() {
 function updateEarthNote() {
   const err = earthError(readRequest());
   if (err) setNote('earthNote', err, 'bad');
-  else if ($('spinOn').value === 'on' && !bulletComplete(readConfig())) setNote('earthNote', 'Spin drift is on but needs bullet weight, diameter, length and twist (Rifle and load).', 'warn');
-  else setNote('earthNote', 'Spin drift needs the bullet details under Rifle and load. Coriolis is only applied to shots beyond 1000 yd (914 m).', '');
+  else if (($('spinOn').value === 'on' || $('aeroOn').value === 'on') && !bulletComplete(readConfig())) setNote('earthNote', 'Spin drift and aerodynamic jump need bullet weight, diameter, length and twist (Rifle and load).', 'warn');
+  else setNote('earthNote', 'Spin drift and aerodynamic jump need the bullet details under Rifle and load. Coriolis is only applied to shots beyond 1000 yd (914 m).', '');
 }
 
 // ---- BLE ------------------------------------------------------------------------
@@ -539,7 +549,7 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').ca
 // ---- wiring --------------------------------------------------------------------------------
 (function init() {
   for (let i = 0; i < 12; i++) { const o = document.createElement('option'); o.value = i; o.textContent = (i === 0 ? 12 : i) + ' o’clock'; $('clock').appendChild(o); }
-  load(); loadProfiles(); refreshLabels();
+  load(); enforceManualOrientation(); loadProfiles(); refreshLabels();
   const ap = activeProfile();
   if (ap) $('profileName').value = ap.name;
 
@@ -571,7 +581,7 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').ca
   ['model','bc','mv','sight','zero','zt','zp','zh'].forEach(f => $(f).addEventListener('input', () => { save(); renderProfiles(); }));
 
   ['range','clock','windSrc','windManual','slopeSrc','slopeManual'].forEach(f => $(f).addEventListener('input', () => { save(); refreshLabels(); queueRequest(); queueCard(); }));
-  ['spinOn','corOn','lat','azSrc','azManual'].forEach(f => $(f).addEventListener('input', () => { save(); refreshLabels(); queueRequest(); queueCard(); }));
+  ['spinOn','aeroOn','corOn','lat','azSrc','azManual'].forEach(f => $(f).addEventListener('input', () => { save(); refreshLabels(); queueRequest(); queueCard(); }));
   ['bmass','bdia','blen','btw','btdir'].forEach(f => $(f).addEventListener('input', () => { save(); renderProfiles(); refreshLabels(); }));
   $('btnGps').onclick = () => {
     if (!navigator.geolocation) { setNote('earthNote', 'This browser has no GPS access. Type your latitude instead.', 'bad'); return; }
