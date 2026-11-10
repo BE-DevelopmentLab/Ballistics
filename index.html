@@ -66,6 +66,7 @@
     <div><b id="outVel">--</b>velocity</div>
     <div><b id="outUsed">--</b>wind used</div>
   </div>
+  <div id="outLead" class="note"></div>
   <div id="outNote" class="note"></div>
 </section>
 
@@ -79,10 +80,10 @@
   <div class="gap"><button id="btnCard" class="ghost">Refresh card</button></div>
   <div id="cardNote" class="note"></div>
   <table>
-    <thead><tr><th id="thRange">Range</th><th id="thUp">UP</th><th id="thWind">WIND</th><th>TOF s</th><th id="thVel">Vel</th></tr></thead>
+    <thead><tr><th id="thRange">Range</th><th id="thUp">UP</th><th id="thWind">WIND</th><th>TOF s</th><th id="thVel">Vel</th><th id="thLead">LEAD</th></tr></thead>
     <tbody id="cardBody"></tbody>
   </table>
-  <div class="note">Uses the wind, slope and conditions below. Wind column: R means dial right.</div>
+  <div class="note">Uses the wind, slope and conditions below. Wind column: R means dial right. Lead column fills in when a moving target is set.</div>
 </section>
 
 <section>
@@ -106,6 +107,16 @@
     <div><label>Angle units</label><select id="angUnit"><option value="MIL">MIL</option><option value="MOA">MOA</option></select></div>
     <div><label>Units</label><select id="units"><option value="imp">Imperial</option><option value="met">Metric</option></select></div>
   </div>
+  <h2 class="gap" style="margin-top:14px">Moving target (optional)</h2>
+  <div class="row">
+    <div><label>Target moving</label>
+      <select id="tgtDir"><option value="none">Not moving</option><option value="L">Toward the left</option><option value="R">Toward the right</option></select></div>
+    <div id="tgtSpeedBox" class="hide"><label id="lTgtSpeed">Target speed</label><input id="tgtSpeed" type="number" inputmode="decimal" value="3"></div>
+  </div>
+  <div id="tgtDelayBox" class="row gap hide">
+    <div><label>Your delay (ms, trigger to shot)</label><input id="tgtDelay" type="number" inputmode="numeric" value="0"></div>
+  </div>
+  <div id="tgtNote" class="note hide">Lead = target speed x (time of flight + your delay). Hold the lead in the direction the target is moving, on top of the wind hold.</div>
 </section>
 
 <section>
@@ -217,7 +228,7 @@ const isConnected = () => !demo && !!(device && device.gatt && device.gatt.conne
 // ---- form persistence (best effort) ---------------------------------------
 const FIELDS = ['model','bc','mv','sight','zero','zt','zp','zh','range','clock','windSrc','windManual','slopeSrc','slopeManual',
                 'angUnit','units','cardStart','cardStep','cardCount',
-                'bmass','bdia','blen','btw','btdir','spinOn','aeroOn','corOn','lat','azSrc','azManual'];
+                'bmass','bdia','blen','btw','btdir','spinOn','aeroOn','corOn','lat','azSrc','azManual','tgtDir','tgtSpeed','tgtDelay'];
 // This handheld has no tilt/compass sensor (the BNO085 comes with the rifle unit in version 2),
 // so slope and shooting direction are always typed in. This also fixes older saved settings.
 const HAS_ORIENTATION_SENSOR = false;
@@ -385,8 +396,35 @@ function renderEnv() {
   $('ePitch').textContent = e.imuOk ? fmt(e.pitchDeg, 1) + '°' : 'n/a';
   $('eDa').textContent = fmt(u.alt[2](e.densityAltM), 0) + ' ' + u.alt[0];
 }
+// ---- moving target lead (computed on the phone from the board's time of flight) ----------
+// Returns { mrad, err }. mrad is signed: + = hold right, - = hold left. null when no target motion.
+function leadMrad(tofS, rangeM) {
+  const dir = $('tgtDir').value;
+  if (dir !== 'L' && dir !== 'R') return { mrad: null, err: null };
+  const spd = String($('tgtSpeed').value).trim() === '' ? NaN : +$('tgtSpeed').value;
+  const delay = num('tgtDelay');
+  if (!Number.isFinite(spd) || spd < 0) return { mrad: null, err: 'Enter a target speed of 0 or more.' };
+  const mps = unit().wind[1](spd);
+  if (mps > 30) return { mrad: null, err: 'Target speed looks too high (over 30 m/s / 67 mph).' };
+  if (!Number.isFinite(delay) || delay < 0 || delay > 2000) return { mrad: null, err: 'Delay must be 0 to 2000 ms.' };
+  if (!(tofS > 0) || !(rangeM > 0)) return { mrad: null, err: null };
+  const leadM = mps * (tofS + delay / 1000);
+  return { mrad: (dir === 'R' ? 1 : -1) * leadM / rangeM * 1000, err: null };
+}
+function renderLead(s) {
+  const n = $('outLead');
+  if (!s || !s.ok) { n.textContent = ''; n.className = 'note'; return; }
+  const L = leadMrad(s.tofS, s.rangeM > 0 ? s.rangeM : readRequest().rangeM);
+  if (L.err) { n.textContent = L.err; n.className = 'note bad'; return; }
+  if (L.mrad === null) { n.textContent = ''; n.className = 'note'; return; }
+  const a = angle(), lead = L.mrad * a.k, tot = (s.windageMrad + L.mrad) * a.k;
+  n.className = 'note warn';
+  n.textContent = 'Lead ' + (lead >= 0 ? 'RIGHT ' : 'LEFT ') + fmt(Math.abs(lead), 2) + ' ' + a.name +
+    '. Total hold with wind: ' + (tot >= 0 ? 'RIGHT ' : 'LEFT ') + fmt(Math.abs(tot), 2) + ' ' + a.name + '.';
+}
 function renderSolution(s) {
   lastSol = s;
+  renderLead(s);
   if (!s) return;
   if (!s.ok) {
     $('outElev').textContent = 'N/A'; $('outWind').textContent = 'N/A';
@@ -409,17 +447,24 @@ function renderCard() {
   $('thUp').textContent = 'UP ' + a.name;
   $('thWind').textContent = 'WIND ' + a.name;
   $('thVel').textContent = 'Vel ' + u.vel[0];
+  $('thLead').textContent = 'LEAD ' + a.name;
   $('cardBody').innerHTML = cardRows.filter(Boolean).map(s => {
-    if (!s.ok) return `<tr><td>${fmt(u.range[2](s.rangeM), 0)}</td><td colspan="4">no solution</td></tr>`;
+    if (!s.ok) return `<tr><td>${fmt(u.range[2](s.rangeM), 0)}</td><td colspan="5">no solution</td></tr>`;
     const up = s.elevationMrad * a.k, wi = s.windageMrad * a.k;
+    const L = leadMrad(s.tofS, s.rangeM), ld = L.mrad === null ? '--' : (L.mrad >= 0 ? 'R' : 'L') + fmt(Math.abs(L.mrad * a.k), 2);
     return `<tr><td>${fmt(u.range[2](s.rangeM), 0)}</td><td class="up">${fmt(up, 2)}</td>` +
-      `<td>${wi >= 0 ? 'R' : 'L'}${fmt(Math.abs(wi), 2)}</td><td>${fmt(s.tofS, 2)}</td><td>${fmt(u.speed[2](s.velocityMps), 0)}</td></tr>`;
+      `<td>${wi >= 0 ? 'R' : 'L'}${fmt(Math.abs(wi), 2)}</td><td>${fmt(s.tofS, 2)}</td><td>${fmt(u.speed[2](s.velocityMps), 0)}</td><td>${ld}</td></tr>`;
   }).join('');
 }
 function refreshLabels() {
   const u = unit();
   $('lRange').textContent = 'Range (' + u.range[0] + ')';
   $('lWind').textContent = 'Wind speed (' + u.wind[0] + ')';
+  $('lTgtSpeed').textContent = 'Target speed (' + u.wind[0] + ')';
+  const moving = $('tgtDir').value === 'L' || $('tgtDir').value === 'R';
+  $('tgtSpeedBox').classList.toggle('hide', !moving);
+  $('tgtDelayBox').classList.toggle('hide', !moving);
+  $('tgtNote').classList.toggle('hide', !moving);
   $('lMv').textContent = 'Muzzle velocity (' + u.speed[0] + ')';
   $('lSight').textContent = 'Sight height (' + u.sight[0] + ')';
   $('lZero').textContent = 'Zero range (' + u.range[0] + ')';
@@ -530,7 +575,7 @@ function queueCard() { clearTimeout(cardTimer); cardTimer = setTimeout(requestCa
 function demoSolution(req) {
   const r = req.rangeM;
   return { ok: true, elevationMrad: 0.0000115 * r * r / 10, windageMrad: 0.003 * r / 100, tofS: r / 700,
-           velocityMps: Math.max(300, 800 - r * 0.5), windMps: req.sensorWind ? 2.2 : req.windSpeedMps };
+           velocityMps: Math.max(300, 800 - r * 0.5), rangeM: r, windMps: req.sensorWind ? 2.2 : req.windSpeedMps };
 }
 function startDemo() {
   demo = true; $('demoBanner').classList.remove('hide'); setStatus('Demo mode', 'warn');
@@ -593,6 +638,7 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').ca
   };
   ['cardStart','cardStep','cardCount'].forEach(f => $(f).addEventListener('input', () => { save(); queueCard(); }));
   $('angUnit').addEventListener('input', () => { save(); renderSolution(lastSol); renderCard(); });
+  ['tgtDir','tgtSpeed','tgtDelay'].forEach(f => $(f).addEventListener('input', () => { save(); refreshLabels(); }));
   $('units').addEventListener('change', () => { convertFormUnits(); save(); refreshLabels(); });
 
   // Keep the card fresh as conditions drift (only when a card is on screen and we are connected).
@@ -604,7 +650,7 @@ let prevUnits = $('units').value;
 function convertFormUnits() {
   const from = U[prevUnits], to = unit();
   const conv = (id, key, d) => { if (String($(id).value).trim() === '') return; const si = from[key][1](+$(id).value); $(id).value = +to[key][2](si).toFixed(d); };
-  conv('range','range',0); conv('windManual','wind',1); conv('mv','speed',0); conv('sight','sight',1);
+  conv('range','range',0); conv('windManual','wind',1); conv('tgtSpeed','wind',1); conv('mv','speed',0); conv('sight','sight',1);
   conv('zero','range',0); conv('zt','temp',0); conv('zp','press', to.press[0] === 'inHg' ? 2 : 1);
   conv('cardStart','range',0); conv('cardStep','range',0);
   const dd = to.dim[0] === 'in' ? 3 : 2;
