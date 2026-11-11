@@ -111,7 +111,7 @@
       headingDeg: v.getUint16(8, true) / 10,
       pitchDeg: v.getInt16(10, true) / 10,
       densityAltM: v.getInt16(12, true),
-      batteryPct: v.getUint8(15) <= 100 ? v.getUint8(15) : null,   // 255 = board could not read it
+      batteryPct: (flags & 4) !== 0 && v.getUint8(15) <= 100 ? v.getUint8(15) : null,   // older firmware leaves bit2 clear (byte 15 is 0)
       bmeOk: (flags & 1) !== 0,
       imuOk: (flags & 2) !== 0,
     };
