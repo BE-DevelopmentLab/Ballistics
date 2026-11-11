@@ -1,6 +1,6 @@
 {
-  "name": "Ballistic Calculator",
-  "short_name": "Ballistics",
+  "name": "Solstice",
+  "short_name": "Solstice",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
