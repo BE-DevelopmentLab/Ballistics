@@ -30,6 +30,7 @@
   .battBar { position:relative; width:32px; height:14px; border:1.5px solid var(--dim); border-radius:3px; padding:1px; }
   .battBar::after { content:''; position:absolute; right:-5px; top:3px; width:3px; height:5px; background:var(--dim); border-radius:0 2px 2px 0; }
   .battBar i { display:block; height:100%; width:0; background:var(--acc); border-radius:1px; }
+  .battBar .bolt { position:absolute; left:50%; top:50%; width:9px; height:12px; transform:translate(-50%,-50%); fill:#fff; stroke:#10130f; stroke-width:1.2; paint-order:stroke; stroke-linejoin:round; }
   .batt.low .battBar i { background:var(--warn); } .batt.crit .battBar i { background:var(--bad); }
   .batt.low, .batt.crit { color:var(--fg); }
   .status::before { content:'\25CF  '; }
@@ -67,7 +68,7 @@
 <body>
 <div class="topbar">
   <h1>Ballistic Calculator</h1>
-  <div id="batt" class="batt hide" title="Board battery (estimated from cell voltage)"><div class="battBar"><i id="battFill"></i></div><span id="battTxt">--</span></div>
+  <div id="batt" class="batt hide" title="Board battery (estimated from cell voltage)"><div class="battBar"><i id="battFill"></i><svg id="battBolt" class="bolt hide" viewBox="0 0 10 14" aria-label="Charging"><path d="M6.5 0 L0.5 8 H4.2 L3 14 L9.5 5.5 H5.8 Z"/></svg></div><span id="battTxt">--</span></div>
   <button id="btnConnect">Connect</button>
 </div>
 <div id="status" class="status warn">Not connected</div>
@@ -246,6 +247,11 @@
   <div class="gap"><button id="btnSave">Send to device</button></div>
   <div id="cfgNote" class="note"></div>
 </section>
+<section id="secSleep">
+  <h2>Power</h2>
+  <button id="btnSleep" class="ghost">Put board to sleep</button>
+  <div id="sleepNote" class="note">Sleeps the board to save battery. Wake it with the BOOT or RESET button on the board, then tap Connect.</div>
+</section>
 </main>
 
 <script src="protocol.js"></script>
@@ -270,7 +276,7 @@ const unit = () => U[$('units').value];
 // only zero range follows the Units switch.
 const RIFLE = U.imp;
 
-let device = null, server = null, chars = {};
+let device = null, server = null, chars = {}, sleeping = false, sleepArm = false, sleepTimer = null;
 let lastEnv = null, sendTimer = null, cardTimer = null, cardWait = null, delArm = null;
 let lastSol = null, cardRows = [];
 const MAX_ROWS = 24;
@@ -494,19 +500,21 @@ const fmt = (v, d) => (Number.isFinite(v) ? v.toFixed(d) : '--');
 function angle() { const moa = $('angUnit').value === 'MOA'; return { k: moa ? MRAD_TO_MOA : 1, name: moa ? 'MOA' : 'MIL' }; }
 
 // Board battery: percent from the board (null = it could not read the cell). Hidden until connected.
-function renderBattery(pct) {
+function renderBattery(pct, charging) {
   const known = pct !== null && pct !== undefined && Number.isFinite(pct);
   $('batt').classList.remove('hide');
   $('batt').classList.toggle('low', known && pct <= 30 && pct > 15);
   $('batt').classList.toggle('crit', known && pct <= 15);
   $('battFill').style.width = known ? Math.max(pct, pct > 0 ? 4 : 0) + '%' : '0%';
   $('battTxt').textContent = known ? pct + '%' : '--';
+  $('battBolt').classList.toggle('hide', !(known && charging));
+  $('batt').title = 'Board battery (read from the fuel gauge)' + (known && charging ? ', charging' : '');
 }
 function hideBattery() { $('batt').classList.add('hide'); }
 function renderEnv() {
   const e = lastEnv, u = unit();
   if (!e) return;
-  renderBattery(e.batteryPct);
+  renderBattery(e.batteryPct, e.charging);
   $('eTemp').textContent = fmt(u.temp[2](e.tempC), 1) + u.temp[0];
   $('eRh').textContent = fmt(e.rhPct, 0) + '%';
   $('ePress').textContent = fmt(u.press[2](e.pressureHpa), u.press[0] === 'inHg' ? 2 : 1) + ' ' + u.press[0];
@@ -631,7 +639,7 @@ async function connect() {
     setStatus('Choose your device...', 'warn');
     hideBattery();
     device = await navigator.bluetooth.requestDevice({ filters: [{ services: [Proto.UUID.service] }] });
-    device.addEventListener('gattserverdisconnected', () => { hideBattery(); setStatus('Disconnected. Tap Connect to retry.', 'warn'); });
+    device.addEventListener('gattserverdisconnected', () => { hideBattery(); if (sleeping) setStatus('Board asleep. Press BOOT or RESET to wake it, then tap Connect.', 'warn'); else setStatus('Disconnected. Tap Connect to retry.', 'warn'); });
     setStatus('Connecting...', 'warn');
     server = await device.gatt.connect();
     const svc = await server.getPrimaryService(Proto.UUID.service);
@@ -649,6 +657,28 @@ async function connect() {
   } catch (e) {
     setStatus('Connect failed: ' + e.message, 'bad');
   }
+}
+
+// ---- sleep (a safe stand-in for a power switch) -------------------------------------------
+function disarmSleep() { sleepArm = false; clearTimeout(sleepTimer); $('btnSleep').textContent = 'Put board to sleep'; }
+async function sleepBoard() {
+  if (!isConnected() || !chars.request) { setNote('sleepNote', 'Connect to the board first.', 'warn'); return false; }
+  try {
+    sleeping = true;
+    // A plain valid request with only the sleep bit set, so it never depends on what is typed in the form.
+    await writeChar(chars.request, Proto.encodeRequest({ sleep: true, rangeM: 100, windClockDeg: 0, windSpeedMps: 0, slopeDeg: 0 }));
+  } catch (e) { sleeping = false; setNote('sleepNote', 'Could not send: ' + e.message, 'bad'); return false; }
+  setNote('sleepNote', 'Sleep sent. Press the BOOT or RESET button on the board to wake it, then tap Connect.', '');
+  setStatus('Board asleep. Press BOOT or RESET to wake it, then tap Connect.', 'warn');
+  hideBattery();
+  setTimeout(() => { try { if (device && device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (e) {} }, 600);
+  return true;
+}
+// Two taps, like Delete, so a stray touch cannot switch the board off.
+function onSleepClick() {
+  if (!isConnected()) { setNote('sleepNote', 'Connect to the board first.', 'warn'); return; }
+  if (!sleepArm) { sleepArm = true; $('btnSleep').textContent = 'Tap again to sleep the board'; sleepTimer = setTimeout(disarmSleep, 4000); return; }
+  disarmSleep(); sleepBoard();
 }
 
 async function sendConfig() {
@@ -697,7 +727,8 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').ca
   const ap = activeProfile();
   if (ap) $('profileName').value = ap.name;
 
-  $('btnConnect').onclick = connect;
+  $('btnConnect').onclick = () => { sleeping = false; connect(); };
+  $('btnSleep').onclick = onSleepClick;
 
   // Wind compass: tap or drag anywhere on the dial; the arrow head follows the finger.
   const dial = $('windDial');

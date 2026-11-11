@@ -19,11 +19,12 @@
   const FLAG_SPIN_DRIFT = 0x08;
   const FLAG_IMU_AZIMUTH = 0x10;
   const FLAG_AERO_JUMP = 0x20;
+  const FLAG_SLEEP = 0x40;
 
   // flags shared by request and card
   function flagsOf(o) {
     return (o.sensorWind ? FLAG_SENSOR_WIND : 0) | (o.imuSlope ? FLAG_IMU_SLOPE : 0) |
-      (o.coriolis ? FLAG_CORIOLIS : 0) | (o.spinDrift ? FLAG_SPIN_DRIFT : 0) | (o.imuAzimuth ? FLAG_IMU_AZIMUTH : 0) | (o.aeroJump ? FLAG_AERO_JUMP : 0);
+      (o.coriolis ? FLAG_CORIOLIS : 0) | (o.spinDrift ? FLAG_SPIN_DRIFT : 0) | (o.imuAzimuth ? FLAG_IMU_AZIMUTH : 0) | (o.aeroJump ? FLAG_AERO_JUMP : 0) | (o.sleep ? FLAG_SLEEP : 0);
   }
 
   function view(bytes) {
@@ -52,7 +53,7 @@
     return b;
   }
 
-  // req: {sensorWind, imuSlope, coriolis, spinDrift, imuAzimuth, aeroJump (bools), rangeM, windClockDeg,
+  // req: {sensorWind, imuSlope, coriolis, spinDrift, imuAzimuth, aeroJump, sleep (bools), rangeM, windClockDeg,
   //       windSpeedMps, slopeDeg, latitudeDeg, azimuthDeg}
   function encodeRequest(req) {
     const b = new Uint8Array(28), v = view(b);
@@ -112,6 +113,7 @@
       pitchDeg: v.getInt16(10, true) / 10,
       densityAltM: v.getInt16(12, true),
       batteryPct: (flags & 4) !== 0 && v.getUint8(15) <= 100 ? v.getUint8(15) : null,   // older firmware leaves bit2 clear (byte 15 is 0)
+      charging: (flags & 8) !== 0,
       bmeOk: (flags & 1) !== 0,
       imuOk: (flags & 2) !== 0,
     };
