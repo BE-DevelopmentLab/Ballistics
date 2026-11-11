@@ -1,10 +1,12 @@
 // Offline cache so the app opens with no signal after the first visit.
 // Bump CACHE when you change any file, or phones will keep serving the old copy.
-const CACHE = 'ballistics-v12';
+const CACHE = 'ballistics-v13';
 const FILES = ['./', './index.html', './protocol.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  // cache: 'reload' skips the browser's own HTTP cache. GitHub Pages sends max-age=600, so without it a
+  // freshly installed worker can store the previous copy of index.html and keep showing the old app.
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
