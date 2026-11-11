@@ -249,8 +249,8 @@
 </section>
 <section id="secSleep">
   <h2>Power</h2>
-  <button id="btnSleep" class="ghost">Put board to sleep</button>
-  <div id="sleepNote" class="note">Sleeps the board to save battery. Wake it with the BOOT or RESET button on the board, then tap Connect.</div>
+  <button id="btnSleep" class="ghost">Sleep mode</button>
+  <div id="sleepNote" class="note">Sleep mode puts the board to sleep to save battery. Wake it with the BOOT or RESET button on the board, then tap Connect.</div>
 </section>
 </main>
 
@@ -660,7 +660,7 @@ async function connect() {
 }
 
 // ---- sleep (a safe stand-in for a power switch) -------------------------------------------
-function disarmSleep() { sleepArm = false; clearTimeout(sleepTimer); $('btnSleep').textContent = 'Put board to sleep'; }
+function disarmSleep() { sleepArm = false; clearTimeout(sleepTimer); $('btnSleep').textContent = 'Sleep mode'; }
 async function sleepBoard() {
   if (!isConnected() || !chars.request) { setNote('sleepNote', 'Connect to the board first.', 'warn'); return false; }
   try {
@@ -677,7 +677,7 @@ async function sleepBoard() {
 // Two taps, like Delete, so a stray touch cannot switch the board off.
 function onSleepClick() {
   if (!isConnected()) { setNote('sleepNote', 'Connect to the board first.', 'warn'); return; }
-  if (!sleepArm) { sleepArm = true; $('btnSleep').textContent = 'Tap again to sleep the board'; sleepTimer = setTimeout(disarmSleep, 4000); return; }
+  if (!sleepArm) { sleepArm = true; $('btnSleep').textContent = 'Tap again for sleep mode'; sleepTimer = setTimeout(disarmSleep, 4000); return; }
   disarmSleep(); sleepBoard();
 }
 
