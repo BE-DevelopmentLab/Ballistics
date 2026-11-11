@@ -23,9 +23,15 @@
   button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); }
   button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); }
   .topbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:2px 0 10px; }
-  .topbar h1 { flex:1 1 0; min-width:0; margin:0; font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .topbar h1 { flex:1 1 0; min-width:0; margin:0; font-size:17px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .topbar button { width:auto; flex:none; padding:6px 12px; font-size:14px; }
-  .status { font-size:11px; padding:4px 8px; border-radius:999px; background:#0d100c; border:1px solid var(--line); max-width:100%; }
+  .status { font-size:12px; padding:4px 10px; border-radius:999px; background:#0d100c; border:1px solid var(--line); margin-bottom:10px; width:fit-content; max-width:100%; }
+  .batt { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--dim); font-variant-numeric:tabular-nums; flex:none; }
+  .battBar { position:relative; width:32px; height:14px; border:1.5px solid var(--dim); border-radius:3px; padding:1px; }
+  .battBar::after { content:''; position:absolute; right:-5px; top:3px; width:3px; height:5px; background:var(--dim); border-radius:0 2px 2px 0; }
+  .battBar i { display:block; height:100%; width:0; background:var(--acc); border-radius:1px; }
+  .batt.low .battBar i { background:var(--warn); } .batt.crit .battBar i { background:var(--bad); }
+  .batt.low, .batt.crit { color:var(--fg); }
   .status::before { content:'\25CF  '; }
   .tabs { display:grid; grid-template-columns:1fr 1fr; gap:3px; background:#0d100c; border:1px solid var(--line); border-radius:10px; padding:3px; margin-bottom:12px; }
   .tabs button { background:transparent; color:var(--dim); border:0; padding:8px; }
@@ -61,9 +67,10 @@
 <body>
 <div class="topbar">
   <h1>Ballistic Calculator</h1>
-  <div id="status" class="status warn">Not connected</div>
+  <div id="batt" class="batt hide" title="Board battery (estimated from cell voltage)"><div class="battBar"><i id="battFill"></i></div><span id="battTxt">--</span></div>
   <button id="btnConnect">Connect</button>
 </div>
+<div id="status" class="status warn">Not connected</div>
 <div class="tabs">
   <button id="tabSimple" class="on">Simple</button>
   <button id="tabAdv">Advanced</button>
@@ -486,9 +493,20 @@ function deleteProfile(id) {
 const fmt = (v, d) => (Number.isFinite(v) ? v.toFixed(d) : '--');
 function angle() { const moa = $('angUnit').value === 'MOA'; return { k: moa ? MRAD_TO_MOA : 1, name: moa ? 'MOA' : 'MIL' }; }
 
+// Board battery: percent from the board (null = it could not read the cell). Hidden until connected.
+function renderBattery(pct) {
+  const known = pct !== null && pct !== undefined && Number.isFinite(pct);
+  $('batt').classList.remove('hide');
+  $('batt').classList.toggle('low', known && pct <= 30 && pct > 15);
+  $('batt').classList.toggle('crit', known && pct <= 15);
+  $('battFill').style.width = known ? Math.max(pct, pct > 0 ? 4 : 0) + '%' : '0%';
+  $('battTxt').textContent = known ? pct + '%' : '--';
+}
+function hideBattery() { $('batt').classList.add('hide'); }
 function renderEnv() {
   const e = lastEnv, u = unit();
   if (!e) return;
+  renderBattery(e.batteryPct);
   $('eTemp').textContent = fmt(u.temp[2](e.tempC), 1) + u.temp[0];
   $('eRh').textContent = fmt(e.rhPct, 0) + '%';
   $('ePress').textContent = fmt(u.press[2](e.pressureHpa), u.press[0] === 'inHg' ? 2 : 1) + ' ' + u.press[0];
@@ -611,8 +629,9 @@ async function connect() {
   }
   try {
     setStatus('Choose your device...', 'warn');
+    hideBattery();
     device = await navigator.bluetooth.requestDevice({ filters: [{ services: [Proto.UUID.service] }] });
-    device.addEventListener('gattserverdisconnected', () => { setStatus('Disconnected. Tap Connect to retry.', 'warn'); });
+    device.addEventListener('gattserverdisconnected', () => { hideBattery(); setStatus('Disconnected. Tap Connect to retry.', 'warn'); });
     setStatus('Connecting...', 'warn');
     server = await device.gatt.connect();
     const svc = await server.getPrimaryService(Proto.UUID.service);
