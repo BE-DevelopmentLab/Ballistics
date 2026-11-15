@@ -62,9 +62,9 @@ Meridian advertises as `Meridian`. Up to 4 links at once (phone, spotter, and Me
    - MESSAGE (write): up to 20 characters for the bottom line ("SEND IT").
    - STATUS (notify 1 Hz and after each command): calibration values, last command result, links, laser state.
 3. **Wind from Solstice:** Meridian scans for a device named `Solstice` with the Solstice service and subscribes to
-   its env packet. **Solstice stops advertising once anything connects to it**, so if the phone is connected to
-   Solstice, Meridian can't find it. Use the phone with Meridian instead (Meridian passes the wind through), or ask
-   Brad to approve a small Solstice change that keeps it advertising with a link open.
+   its env packet. Solstice keeps advertising while a link is open (change approved by Brad 2026-11-15, in the
+   laptop's Solstice `main.cpp`), so the phone and Meridian can both connect to it. Solstice firmware older than
+   that stops advertising once the phone connects, and then Meridian can't find it.
 
 `tools/meridian_client.py` (Python, `pip install bleak`) talks to Meridian from the laptop or the Jetson:
 `scan`, `watch`, `range`, `correct 5.0 -1.2 --range 612`, `message "SEND IT"`, and every command. The spotter
@@ -93,7 +93,7 @@ and the wind direction and spin/Coriolis/jump switches from the app's last reque
 6. Level: with the scope's bubble level, send `level`.
 7. Laser (once the LRF0306C manual is in hand): check the self-check reply in the serial log, range known distances
    (a 100 m and a 300+ m target), and set `laser-offset` if there is a constant error. Try first vs last target.
-8. Solstice link: with the phone NOT connected to Solstice, check the screen shows WIND and the env wind matches.
+8. Solstice link: flash the updated Solstice, connect the phone to Solstice, then check Meridian's screen shows WIND too.
 9. Spotter: `python tools/meridian_client.py correct 5.0 -1.2 --range <laser range>` and check the screen.
 
 ## Working rules
