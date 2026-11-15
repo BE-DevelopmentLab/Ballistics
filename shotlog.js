@@ -18,6 +18,7 @@
       shot: Object.assign({}, i.shot), rangeM: +i.rangeM,
       holdUpMrad: +i.holdUpMrad, holdRightMrad: +i.holdRightMrad || 0, impactUpMrad: +i.impactUpMrad || 0, impactRightMrad: +i.impactRightMrad || 0,
       powder: String(i.powder || '').slice(0, 60), chargeGr: Number.isFinite(+i.chargeGr) && String(i.chargeGr).trim() !== '' ? +i.chargeGr : null,
+      bullet: i.bullet ? Object.assign({}, i.bullet) : null,
       use: true,
     };
     const p = Solver.solve(s.cfg, s.atm, s.shot, s.rangeM);
@@ -110,12 +111,12 @@
   function toCsv(shots) {
     const head = ['time', 'profile', 'range_m', 'range_yd', 'hold_up_mrad', 'hold_right_mrad', 'impact_up_mrad', 'impact_right_mrad',
       'come_up_that_hit_mrad', 'solver_said_mrad', 'temp_c', 'pressure_hpa', 'rh_pct', 'conditions_from', 'wind_mps', 'wind_from_deg', 'slope_deg',
-      'muzzle_fps', 'bc', 'drag_model', 'powder', 'charge_gr', 'used_for_truing', 'note'];
+      'muzzle_fps', 'bc', 'drag_model', 'powder', 'charge_gr', 'bullet', 'bullet_gr', 'bullet_dia_in', 'bullet_sd', 'bullet_type', 'bullet_bc', 'bc_model', 'used_for_truing', 'note'];
     const q = (v) => { const t = String(v === null || v === undefined ? '' : v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
     const n = (v, d) => (Number.isFinite(v) ? (+v.toFixed(d)).toString() : '');
     const rows = shots.map((s) => [new Date(s.time).toISOString(), s.profile, n(s.rangeM, 1), n(s.rangeM / 0.9144, 1), n(s.holdUpMrad, 2), n(s.holdRightMrad, 2),
       n(s.impactUpMrad, 2), n(s.impactRightMrad, 2), n(observedUp(s), 2), n(s.predUpMrad, 2), n(s.atm.tempC, 1), n(s.atm.pressureHpa, 1), n(s.atm.rhPct, 0),
-      s.atmSource, n(s.shot.windSpeedMps, 2), n(s.shot.windClockDeg, 0), n(s.shot.slopeDeg, 1), n(s.cfg.muzzleMps / 0.3048, 0), n(s.cfg.bc, 3), s.cfg.model, s.powder || '', n(s.chargeGr, 1),
+      s.atmSource, n(s.shot.windSpeedMps, 2), n(s.shot.windClockDeg, 0), n(s.shot.slopeDeg, 1), n(s.cfg.muzzleMps / 0.3048, 0), n(s.cfg.bc, 3), s.cfg.model, s.powder || '', n(s.chargeGr, 1), (s.bullet || {}).name || '', n((s.bullet || {}).weightGr, 1), n((s.bullet || {}).diaIn, 3), n((s.bullet || {}).sd, 3), (s.bullet || {}).type || '', n((s.bullet || {}).bc, 3), (s.bullet || {}).model || '',
       s.use === false ? 'no' : 'yes', s.note].map(q).join(','));
     return [head.join(',')].concat(rows).join('\n') + '\n';
   }

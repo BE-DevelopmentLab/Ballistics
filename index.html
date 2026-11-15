@@ -174,6 +174,28 @@
   <div class="note">Saved with every shot you log and every load test, so loads can be compared below.</div>
 </section>
 
+<section id="secBullet" class="load-only load-tab">
+  <h2>Bullet</h2>
+  <div><label>Bullet</label><input id="blName" type="text" maxlength="60" placeholder="e.g. Barnes Match Burner 77 gr OTM"></div>
+  <div class="row gap">
+    <div><label>Weight (gr)</label><input id="blWeight" type="number" inputmode="decimal" step="0.1" placeholder="e.g. 77"></div>
+    <div><label>Size: diameter (in)</label><input id="blDia" type="number" inputmode="decimal" step="0.001" placeholder="e.g. 0.224"></div>
+  </div>
+  <div class="row gap">
+    <div><label>Type</label><select id="blType"><option value="">(pick)</option><option>Match hollow point (HPBT/OTM)</option><option>Hybrid / VLD</option><option>Polymer tip</option><option>Monolithic (copper)</option><option>Soft point</option><option>FMJ</option><option>Other</option></select></div>
+    <div><label>Sectional density</label><input id="blSd" type="text" readonly placeholder="from weight and size"></div>
+  </div>
+  <div class="row gap">
+    <div><label>BC (lb/in²)</label><input id="blBc" type="number" inputmode="decimal" step="0.001" placeholder="e.g. 0.176"></div>
+    <div><label>BC model</label><select id="blModel"><option>G7</option><option>G1</option></select></div>
+  </div>
+  <div class="row gap">
+    <button id="btnBlFrom" class="ghost">Copy from profile</button>
+    <button id="btnBlUse" class="ghost">Use in profile</button>
+  </div>
+  <div id="blNote" class="note">Sectional density = weight (gr) / 7000 / diameter². Saved with every shot and load test. Use in profile copies the BC and model into Rifle and load, plus the weight and diameter when the bullet length and twist are filled in there.</div>
+</section>
+
 <section id="secLog" class="load-only load-tab">
   <h2>Shot log</h2>
   <div class="row">
@@ -492,7 +514,7 @@ const isConnected = () => !!(device && device.gatt && device.gatt.connected && c
 const FIELDS = ['model','bc','mv','sight','zero','zt','zp','zh','range','windDir','windSrc','windManual','slopeSrc','slopeManual',
                 'angUnit','units','cardStart','cardStep','cardCount',
                 'bmass','bdia','blen','btw','btdir','spinOn','aeroOn','corOn','lat','azSrc','azManual','tgtDir','tgtSpeed','tgtDelay',
-                'hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange','ldPowder','ldCharge','ldNotes','grpDist','grpScaleIn','trueMvSrc','stgOrder','stgLow','tgShape','tgW','tgH','tgShots'];
+                'hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange','ldPowder','ldCharge','ldNotes','grpDist','grpScaleIn','trueMvSrc','stgOrder','stgLow','tgShape','tgW','tgH','tgShots','blName','blWeight','blDia','blType','blBc','blModel'];
 // This handheld has no tilt/compass sensor (the BNO085 comes with the rifle unit in version 2),
 // so slope and shooting direction are always typed in. This also fixes older saved settings.
 const HAS_ORIENTATION_SENSOR = false;
@@ -897,7 +919,7 @@ function logShot() {
     rangeM: u.range[1](fieldNum('logRange')), holdUpMrad: fieldNum('logUp') / a.k,
     holdRightMrad: (blank('logRight') ? 0 : fieldNum('logRight')) / a.k,
     impactUpMrad: (blank('logImpUp') ? 0 : fieldNum('logImpUp')) / a.k, impactRightMrad: (blank('logImpRight') ? 0 : fieldNum('logImpRight')) / a.k,
-    note: $('logNote').value, powder: $('ldPowder').value, chargeGr: $('ldCharge').value,
+    note: $('logNote').value, powder: $('ldPowder').value, chargeGr: $('ldCharge').value, bullet: readBullet(),
   };
   const err = validateConfig(inp.cfg) || ShotLog.validateShot(inp);
   if (err) { setNote('logNoteOut', err, 'bad'); return null; }
@@ -1089,7 +1111,7 @@ function saveLoadTest() {
   const powder = String($('ldPowder').value).trim(), charge = fieldNum('ldCharge');
   if (!powder && !Number.isFinite(charge)) { setNote('testNote', 'Enter the powder and charge weight under Load first.', 'bad'); return null; }
   if (!st && !g) { setNote('testNote', 'Enter a chronograph string or measure a group first.', 'bad'); return null; }
-  const t = { time: Date.now(), profile: profileLabel(), powder, chargeGr: Number.isFinite(charge) ? charge : null, notes: String($('ldNotes').value).trim(),
+  const t = { time: Date.now(), profile: profileLabel(), powder, chargeGr: Number.isFinite(charge) ? charge : null, notes: String($('ldNotes').value).trim(), bullet: readBullet(),
     velocities: st ? ShotLog.parseVelocities($('chronoIn').value) : [], avgFps: st ? st.mean : null, sdFps: st ? st.sd : null, esFps: st ? st.es : null,
     groupMoa: g ? g.esMoa : null, groupIn: g ? g.esIn : null, groupShots: g ? g.n : null, distYd: g ? grpDistYd() : null };
   loadTests.push(t);
@@ -1100,9 +1122,40 @@ function saveLoadTest() {
 }
 function renderLoadTests() {
   const list = loadTests.filter(t => t.profile === profileLabel()).slice().sort((a, b) => (a.powder || '').localeCompare(b.powder || '') || (a.chargeGr || 0) - (b.chargeGr || 0));
-  $('testBody').innerHTML = list.map(t => `<tr><td>${esc(t.powder || '--')}</td><td>${t.chargeGr === null ? '--' : fmt(t.chargeGr, 1)}</td>` +
+  $('testBody').innerHTML = list.map(t => `<tr><td>${esc(t.powder || '--')}${bulletText(t.bullet) ? '<br><span style="font-size:11px;color:var(--dim)">' + esc(bulletText(t.bullet)) + '</span>' : ''}</td><td>${t.chargeGr === null ? '--' : fmt(t.chargeGr, 1)}</td>` +
     `<td>${t.avgFps === null ? '--' : fmt(t.avgFps, 0)}</td><td>${t.sdFps === null ? '--' : fmt(t.sdFps, 1)}</td><td>${t.esFps === null ? '--' : fmt(t.esFps, 0)}</td>` +
     `<td class="up">${t.groupMoa === null ? '--' : fmt(t.groupMoa, 2)}</td></tr>`).join('');
+}
+
+// ---- bullet used (Load development) -----------------------------------------------------------
+const sectionalDensity = (gr, dia) => (gr > 0 && dia > 0 ? gr / 7000 / (dia * dia) : null);
+function readBullet() {
+  const w = fieldNum('blWeight'), d = fieldNum('blDia'), bc = fieldNum('blBc'), sd = sectionalDensity(w, d);
+  return { name: String($('blName').value).trim(), weightGr: Number.isFinite(w) ? w : null, diaIn: Number.isFinite(d) ? d : null,
+    type: $('blType').value, bc: Number.isFinite(bc) ? bc : null, model: $('blModel').value, sd: sd === null ? null : +sd.toFixed(3) };
+}
+function renderBullet() { const b = readBullet(); $('blSd').value = b.sd === null ? '' : b.sd.toFixed(3); return b; }
+const bulletText = (b) => !b ? '' : [b.name, b.weightGr ? b.weightGr + ' gr' : '', b.type].filter(Boolean).join(' ').trim();
+function bulletFromProfile() {
+  const c = readConfig();
+  if (c.massGr > 0) $('blWeight').value = c.massGr;
+  if (c.diameterM > 0) $('blDia').value = +(c.diameterM / 0.0254).toFixed(3);
+  $('blBc').value = +c.bc.toFixed(3); $('blModel').value = c.model;
+  save(); renderBullet(); setNote('blNote', 'Copied from the profile.', '');
+}
+function bulletToProfile() {
+  const b = readBullet();
+  if (!(b.bc > 0)) { setNote('blNote', 'Enter the BC first.', 'bad'); return false; }
+  $('bc').value = b.bc; $('model').value = b.model;
+  // Weight and diameter belong to the spin-drift bullet data, which is all or nothing: only fill them in
+  // when length and twist are already there, so the profile never ends up half filled.
+  const spinReady = String($('blen').value).trim() !== '' && String($('btw').value).trim() !== '';
+  if (spinReady && b.weightGr > 0) $('bmass').value = b.weightGr;
+  if (spinReady && b.diaIn > 0) $('bdia').value = b.diaIn;
+  save(); refreshLabels();
+  setNote('blNote', 'Copied ' + (spinReady ? 'BC, model, weight and diameter' : 'BC and model (weight and diameter go in too once bullet length and twist are filled in under Rifle and load)') +
+    '. Save the profile to keep it' + (isConnected() ? ', and tap Send to device.' : '.'), '');
+  return true;
 }
 
 // ---- stage planner (logic in stage.js; solved on the phone) -------------------------------------
@@ -1431,6 +1484,10 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').ca
   $('btnGrpRemove').onclick = () => grpRemovePhoto();
 
   // Stage planner
+  renderBullet();
+  ['blName','blWeight','blDia','blType','blBc','blModel'].forEach(f => $(f).addEventListener('input', () => { save(); renderBullet(); }));
+  $('btnBlFrom').onclick = () => bulletFromProfile();
+  $('btnBlUse').onclick = () => bulletToProfile();
   loadStages();
   $('btnTgAdd').onclick = () => addTarget();
   $('stgList').addEventListener('click', (ev) => { const b = ev.target && ev.target.closest && ev.target.closest('button[data-act]'); if (b) stageAction(b.getAttribute('data-act'), b.getAttribute('data-id')); });
