@@ -63,6 +63,9 @@
   td { text-align:right; padding:6px; border-bottom:1px solid #20271c; }
   th:first-child, td:first-child { text-align:left; }
   td.up { color:var(--acc); font-weight:600; }
+  .hitbig { text-align:center; background:#0d100c; border:1px solid var(--line); border-radius:10px; padding:8px; }
+  .hitbig b { display:block; font-size:34px; font-variant-numeric:tabular-nums; }
+  .hitbig span { font-size:12px; color:var(--dim); }
 </style>
 </head>
 <body>
@@ -91,6 +94,34 @@
   </div>
   <div id="outLead" class="note"></div>
   <div id="outNote" class="note"></div>
+  <div id="outHit" class="note"></div>
+</section>
+
+<section id="secHit" class="adv-only">
+  <h2>Hit chance</h2>
+  <div class="hitbig"><b id="hitPct">--</b><span id="hitSub">first-round hit chance</span></div>
+  <div class="row gap">
+    <div><label>Target shape</label><select id="hitShape"><option value="circle">Round plate</option><option value="rect">Rectangle</option></select></div>
+    <div><label id="lHitW">Width</label><input id="hitW" type="number" inputmode="decimal" value="10"></div>
+  </div>
+  <div id="hitHBox" class="row gap">
+    <div></div>
+    <div><label id="lHitH">Height</label><input id="hitH" type="number" inputmode="decimal" value="10"></div>
+  </div>
+  <div class="row gap">
+    <div><label>Group size (MOA)</label><input id="hitGroup" type="number" inputmode="decimal" step="0.1" value="1"></div>
+    <div><label>Shots per group</label><select id="hitShots"><option value="3">3</option><option value="5" selected>5</option><option value="10">10</option></select></div>
+  </div>
+  <div class="row gap">
+    <div><label>Velocity SD (fps)</label><input id="hitSd" type="number" inputmode="decimal" value="10"></div>
+    <div><label id="lHitWind">Wind call error</label><input id="hitWind" type="number" inputmode="decimal" step="0.5" value="2"></div>
+  </div>
+  <div class="row gap">
+    <div><label id="lHitRange">Range error</label><input id="hitRange" type="number" inputmode="decimal" value="5"></div>
+    <div></div>
+  </div>
+  <div id="hitNote" class="note"></div>
+  <div class="note">Uses the current solution. Errors are typical (one standard deviation): how far off your wind call or range usually is. A laser rangefinder is about 1 to 2 yd; a guessed range is often 5% or more. Group size is the extreme spread of your usual groups (it covers you and the rifle); velocity SD comes from a chronograph.</div>
 </section>
 
 <section id="secCard" class="adv-only">
@@ -255,6 +286,7 @@
 </main>
 
 <script src="protocol.js"></script>
+<script src="hitprob.js"></script>
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);
@@ -266,10 +298,10 @@ const bytesOf = (dv) => new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
 const U = {
   imp: { range:['yd',v=>v*0.9144,v=>v/0.9144], speed:['fps',v=>v*0.3048,v=>v/0.3048], sight:['in',v=>v*0.0254,v=>v/0.0254],
          temp:['°F',v=>(v-32)*5/9,v=>v*9/5+32], press:['inHg',v=>v*33.8639,v=>v/33.8639], wind:['mph',v=>v*0.44704,v=>v/0.44704],
-         alt:['ft',v=>v*0.3048,v=>v/0.3048], dim:['in',v=>v*0.0254,v=>v/0.0254], vel:['fps'] },
+         alt:['ft',v=>v*0.3048,v=>v/0.3048], dim:['in',v=>v*0.0254,v=>v/0.0254], vel:['fps'], tsize:['in',v=>v*0.0254,v=>v/0.0254] },
   met: { range:['m',v=>v,v=>v], speed:['m/s',v=>v,v=>v], sight:['cm',v=>v/100,v=>v*100],
          temp:['°F',v=>(v-32)*5/9,v=>v*9/5+32], press:['hPa',v=>v,v=>v], wind:['m/s',v=>v,v=>v],
-         alt:['m',v=>v,v=>v], dim:['mm',v=>v/1000,v=>v*1000], vel:['m/s'] },
+         alt:['m',v=>v,v=>v], dim:['mm',v=>v/1000,v=>v*1000], vel:['m/s'], tsize:['cm',v=>v/100,v=>v*100] },
 };
 const unit = () => U[$('units').value];
 // Temperature is always °F (set in both tables above). Rifle and load fields are always imperial;
@@ -288,7 +320,8 @@ const isConnected = () => !!(device && device.gatt && device.gatt.connected && c
 // ---- form persistence (best effort) ---------------------------------------
 const FIELDS = ['model','bc','mv','sight','zero','zt','zp','zh','range','windDir','windSrc','windManual','slopeSrc','slopeManual',
                 'angUnit','units','cardStart','cardStep','cardCount',
-                'bmass','bdia','blen','btw','btdir','spinOn','aeroOn','corOn','lat','azSrc','azManual','tgtDir','tgtSpeed','tgtDelay'];
+                'bmass','bdia','blen','btw','btdir','spinOn','aeroOn','corOn','lat','azSrc','azManual','tgtDir','tgtSpeed','tgtDelay',
+                'hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange'];
 // This handheld has no tilt/compass sensor (the BNO085 comes with the rifle unit in version 2),
 // so slope and shooting direction are always typed in. This also fixes older saved settings.
 const HAS_ORIENTATION_SENSOR = false;
@@ -549,9 +582,45 @@ function renderLead(s) {
   n.textContent = 'Lead ' + (lead >= 0 ? 'RIGHT ' : 'LEFT ') + fmt(Math.abs(lead), 2) + ' ' + a.name +
     '. Total hold with wind: ' + (tot >= 0 ? 'RIGHT ' : 'LEFT ') + fmt(Math.abs(tot), 2) + ' ' + a.name + '.';
 }
+// ---- hit chance (phone side, from the board's solution; maths in hitprob.js) ----------------
+const HIT_NAMES = { group: 'your group size', mv: 'velocity spread', range: 'range error', wind: 'wind call error' };
+const fieldNum = (id) => (String($(id).value).trim() === '' ? NaN : +$(id).value);
+function hitInputs(s) {
+  const u = unit(), cfg = readConfig();
+  return {
+    muzzleMps: cfg.muzzleMps, zeroRangeM: cfg.zeroRangeM, sightHeightM: cfg.sightHeightM,
+    tofS: s ? s.tofS : NaN, velocityMps: s ? s.velocityMps : NaN, rangeM: s ? (s.rangeM > 0 ? s.rangeM : readRequest().rangeM) : NaN,
+    shape: $('hitShape').value, widthM: u.tsize[1](fieldNum('hitW')), heightM: u.tsize[1](fieldNum('hitH')),
+    groupMoa: fieldNum('hitGroup'), groupShots: +$('hitShots').value, mvSdMps: RIFLE.speed[1](fieldNum('hitSd')),
+    windErrMps: u.wind[1](fieldNum('hitWind')), rangeErrM: u.range[1](fieldNum('hitRange')),
+  };
+}
+function targetText() {
+  const u = unit(), w = fieldNum('hitW'), h = fieldNum('hitH');
+  return $('hitShape').value === 'circle' ? w + ' ' + u.tsize[0] + ' round plate' : w + ' x ' + h + ' ' + u.tsize[0] + ' target';
+}
+function renderHit(s) {
+  const u = unit();
+  $('lHitW').textContent = ($('hitShape').value === 'circle' ? 'Diameter (' : 'Width (') + u.tsize[0] + ')';
+  $('lHitH').textContent = 'Height (' + u.tsize[0] + ')';
+  $('lHitWind').textContent = 'Wind call error (' + u.wind[0] + ')';
+  $('lHitRange').textContent = 'Range error (' + u.range[0] + ')';
+  $('hitHBox').classList.toggle('hide', $('hitShape').value === 'circle');
+  if (!s || !s.ok) { $('hitPct').textContent = '--'; setNote('hitNote', 'Connect and get a solution to see the hit chance.', ''); $('outHit').textContent = ''; return null; }
+  const r = HitProb.assess(hitInputs(s));
+  if (r.err) { $('hitPct').textContent = '--'; setNote('hitNote', r.err, 'bad'); $('outHit').textContent = ''; return r; }
+  const pct = Math.round(r.p * 100), a = angle(), toLen = (mrad) => fmt(u.tsize[2](mrad / 1000 * hitInputs(s).rangeM), 1) + ' ' + u.tsize[0];
+  $('hitPct').textContent = pct + '%';
+  $('hitSub').textContent = 'first-round hit chance, ' + targetText();
+  setNote('hitNote', 'Typical miss (1 SD): ' + toLen(r.sigmaXMrad) + ' left/right, ' + toLen(r.sigmaYMrad) + ' up/down (' +
+    fmt(r.sigmaXMrad * a.k, 2) + ' x ' + fmt(r.sigmaYMrad * a.k, 2) + ' ' + a.name + '). Biggest factor: ' + HIT_NAMES[r.biggest] + '.', pct < 50 ? 'warn' : '');
+  $('outHit').textContent = 'Hit chance ' + pct + '% (' + targetText() + ').';
+  return r;
+}
 function renderSolution(s) {
   lastSol = s;
   renderLead(s);
+  renderHit(s);
   if (!s) return;
   if (!s.ok) {
     $('outElev').textContent = 'N/A'; $('outWind').textContent = 'N/A';
@@ -782,6 +851,7 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').ca
   ['cardStart','cardStep','cardCount'].forEach(f => $(f).addEventListener('input', () => { save(); queueCard(); }));
   $('angUnit').addEventListener('input', () => { save(); renderSolution(lastSol); renderCard(); });
   ['tgtDir','tgtSpeed','tgtDelay'].forEach(f => $(f).addEventListener('input', () => { save(); refreshLabels(); }));
+  ['hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange'].forEach(f => $(f).addEventListener('input', () => { save(); renderHit(lastSol); }));
   $('units').addEventListener('change', () => { convertFormUnits(); save(); refreshLabels(); });
 
   // Keep the card fresh as conditions drift (only when a card is on screen and we are connected).
@@ -795,6 +865,7 @@ function convertFormUnits() {
   const conv = (id, key, d) => { if (String($(id).value).trim() === '') return; const si = from[key][1](+$(id).value); $(id).value = +to[key][2](si).toFixed(d); };
   // Rifle and load fields stay imperial and temperature stays °F, so only these change.
   conv('range','range',0); conv('windManual','wind',1); conv('tgtSpeed','wind',1);
+  conv('hitW','tsize',1); conv('hitH','tsize',1); conv('hitWind','wind',1); conv('hitRange','range',0);
   conv('zero','range',0); conv('cardStart','range',0); conv('cardStep','range',0);
   prevUnits = $('units').value;
 }
