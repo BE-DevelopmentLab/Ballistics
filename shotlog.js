@@ -14,7 +14,7 @@
     const s = {
       id: (i.time || Date.now()).toString(36) + Math.random().toString(36).slice(2, 6),
       time: i.time || Date.now(), profile: i.profile || '', note: String(i.note || '').slice(0, 200),
-      cfg: Object.assign({}, i.cfg), atm: Object.assign({}, i.atm), atmSource: i.atmSource || 'board',
+      cfg: Object.assign({}, i.cfg), atm: Object.assign({}, i.atm), atmSource: i.atmSource || 'solstice',
       shot: Object.assign({}, i.shot), rangeM: +i.rangeM,
       holdUpMrad: +i.holdUpMrad, holdRightMrad: +i.holdRightMrad || 0, impactUpMrad: +i.impactUpMrad || 0, impactRightMrad: +i.impactRightMrad || 0,
       powder: String(i.powder || '').slice(0, 60), chargeGr: Number.isFinite(+i.chargeGr) && String(i.chargeGr).trim() !== '' ? +i.chargeGr : null,
@@ -37,38 +37,62 @@
   const obsOf = (s) => ({ atm: s.atm, shot: s.shot, rangeM: s.rangeM, observedMrad: observedUp(s) });
   const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
 
-  // True the load from logged shots, using each shot's own conditions.
-  //   shots past 600 yd true the BC; shots from 300 to 600 yd true the muzzle velocity.
-  //   With only one band, only that value changes (with only far shots, the MV is taken as right, e.g. chronographed).
+  // True the load from logged shots, using each shot's own conditions. All shots from 300 yd out are used.
+  //   mvKnown (the MV came from a chronograph): only the BC is fitted. This is the reliable way.
+  //   Otherwise MV and BC are fitted together (least squares) when the shots cover at least 150 yd of range;
+  //   with a narrower spread only the MV is trued, since the two cannot be told apart.
+  //   Inside 600 yd, MV and BC change the come-up in nearly the same way, so a fit of both from 300-600 yd
+  //   shots is easily thrown off by small impact errors: the result carries a +/- (1 SD) so the shooter can see it.
   // cfg: the current profile (sight height, zero, bullet). Returns
-  //   { ok, muzzleMps, bc, usedMid, usedFar, before: rms mrad, after: rms mrad, residuals: [{id, mrad}], msg }
-  function trueFromLog(shots, cfg) {
+  //   { ok, muzzleMps, bc, mvSd, bcSd, fitted: 'bc'|'mv'|'both', used, before: rms mrad, after: rms mrad, residuals, msg, weak }
+  const SPREAD_MIN_M = 150 * 0.9144;
+  function fit(usable, cfg, params) {
+    // Gauss-Newton on the come-up residuals. params: names in cfg ('muzzleMps', 'bc').
+    const c = Object.assign({}, cfg), step = { muzzleMps: 1, bc: cfg.bc * 0.01 };
+    const resid = (cc) => usable.map((s) => { const p = Solver.solve(cc, s.atm, s.shot, s.rangeM); return p.ok ? observedUp(s) - p.elevationMrad : NaN; });
+    let r = resid(c), JtJ = null;
+    for (let it = 0; it < 12; it++) {
+      if (!r.every(Number.isFinite)) return null;
+      const J = params.map((k) => { const cc = Object.assign({}, c); cc[k] += step[k]; const rr = resid(cc); return rr.map((v, i) => -(v - r[i]) / step[k]); });
+      const n = params.length, A = [], b = [];
+      for (let a = 0; a < n; a++) { A.push([]); b.push(J[a].reduce((t, v, i) => t + v * r[i], 0)); for (let q = 0; q < n; q++) A[a].push(J[a].reduce((t, v, i) => t + v * J[q][i], 0)); }
+      JtJ = A;
+      let dx;
+      if (n === 1) dx = [b[0] / A[0][0]];
+      else { const det = A[0][0] * A[1][1] - A[0][1] * A[1][0]; if (!(Math.abs(det) > 0)) return null; dx = [(A[1][1] * b[0] - A[0][1] * b[1]) / det, (A[0][0] * b[1] - A[1][0] * b[0]) / det]; }
+      params.forEach((k, a) => { c[k] += dx[a]; });
+      if (!(c.bc > 0.02 && c.bc < 2 && c.muzzleMps > 150 && c.muzzleMps < 1600)) return null;
+      r = resid(c);
+      if (params.every((k, a) => Math.abs(dx[a]) < step[k] * 0.01)) break;
+    }
+    // 1 SD of each fitted value from the scatter left over (needs more shots than values).
+    const dof = usable.length - params.length, sd = {};
+    if (dof > 0 && JtJ) {
+      const s2 = r.reduce((t, v) => t + v * v, 0) / dof, n = params.length;
+      const inv = n === 1 ? [[1 / JtJ[0][0]]] : (() => { const d = JtJ[0][0] * JtJ[1][1] - JtJ[0][1] * JtJ[1][0]; return [[JtJ[1][1] / d, -JtJ[0][1] / d], [-JtJ[1][0] / d, JtJ[0][0] / d]]; })();
+      params.forEach((k, a) => { sd[k] = Math.sqrt(Math.max(0, s2 * inv[a][a])); });
+    }
+    return { c, sd };
+  }
+  function trueFromLog(shots, cfg, opts) {
+    const o = opts || {};
     const usable = shots.filter((s) => s.use !== false && s.rangeM >= MID_MIN_M && s.rangeM > cfg.zeroRangeM && observedUp(s) > 0);
-    const mid = usable.filter((s) => s.rangeM < FAR_MIN_M), far = usable.filter((s) => s.rangeM >= FAR_MIN_M);
-    if (!mid.length && !far.length) return { ok: false, msg: 'Log at least one shot past 300 yd (274 m) with its impact to true the load.' };
-    const c = Object.assign({}, cfg);
+    if (!usable.length) return { ok: false, msg: 'Log at least one shot from 300 yd (274 m) out, with its impact, to true the load.' };
     const rms = (cc) => {
       const r = usable.map((s) => { const p = Solver.solve(cc, s.atm, s.shot, s.rangeM); return { id: s.id, mrad: p.ok ? observedUp(s) - p.elevationMrad : NaN }; });
       return { list: r, rms: Math.sqrt(mean(r.map((x) => x.mrad * x.mrad))) };
     };
-    const before = rms(c).rms;
-    for (let pass = 0; pass < (mid.length && far.length ? 4 : 1); pass++) {
-      if (mid.length) {
-        const v = mid.map((s) => Solver.trueMv(c, obsOf(s))).filter((x) => x !== null);
-        if (!v.length) return { ok: false, msg: 'Could not match the 300-600 yd shots. Check the range, hold and impact you logged.' };
-        c.muzzleMps = mean(v);
-      }
-      if (far.length) {
-        const v = far.map((s) => Solver.trueBc(c, obsOf(s))).filter((x) => x !== null);
-        if (!v.length) return { ok: false, msg: 'Could not match the shots past 600 yd. Check the range, hold and impact you logged.' };
-        c.bc = mean(v);
-      }
-    }
-    const after = rms(c);
-    let msg = mid.length && far.length ? 'Trued velocity from ' + mid.length + ' mid-range and BC from ' + far.length + ' long-range shot(s).'
-      : mid.length ? 'Trued velocity only (no shots past 600 yd yet, so the BC is unchanged).'
-      : 'Trued BC only (no 300-600 yd shots, so the velocity is taken as right; chronograph it if you can).';
-    return { ok: true, muzzleMps: c.muzzleMps, bc: c.bc, usedMid: mid.length, usedFar: far.length, before, after: after.rms, residuals: after.list, msg };
+    const before = rms(cfg).rms;
+    const ranges = usable.map((s) => s.rangeM), spread = Math.max.apply(null, ranges) - Math.min.apply(null, ranges);
+    const fitted = o.mvKnown ? 'bc' : (usable.length >= 2 && spread >= SPREAD_MIN_M ? 'both' : 'mv');
+    const f = fit(usable, cfg, fitted === 'bc' ? ['bc'] : fitted === 'mv' ? ['muzzleMps'] : ['muzzleMps', 'bc']);
+    if (!f) return { ok: false, msg: 'Could not match the logged shots. Check the range, hold and impact you logged.' };
+    const after = rms(f.c), bcSd = f.sd.bc === undefined ? null : f.sd.bc, mvSd = f.sd.muzzleMps === undefined ? null : f.sd.muzzleMps;
+    const weak = fitted === 'both' && (bcSd === null || bcSd > 0.05 * f.c.bc);
+    const msg = fitted === 'bc' ? 'Trued the BC from ' + usable.length + ' shot(s), keeping your chronograph velocity.'
+      : fitted === 'mv' ? 'Trued the velocity only: ' + (usable.length < 2 ? 'one shot' : 'the shots are all at about the same range') + ', and that cannot separate velocity from BC. Log shots at least 150 yd apart, or tick the chronograph box to true the BC.'
+      : 'Trued velocity and BC together from ' + usable.length + ' shots.' + (weak ? ' Between 300 and 600 yd the two look alike, so this BC is rough. A chronographed velocity (tick the box) gives a much firmer BC.' : '');
+    return { ok: true, muzzleMps: f.c.muzzleMps, bc: f.c.bc, mvSd, bcSd, fitted, used: usable.length, before, after: after.rms, residuals: after.list, msg, weak };
   }
 
   // Chronograph string: velocities in any one unit -> { n, mean, es, sd } in the same unit (sd is the sample SD).

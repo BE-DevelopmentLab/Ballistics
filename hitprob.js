@@ -95,7 +95,7 @@
     if (!(i.widthM > 0) || (i.shape !== 'circle' && !(i.heightM > 0))) return { err: 'Enter the target size.' };
     if (![i.groupMoa, i.mvSdMps, i.windErrMps, i.rangeErrM].every((x) => Number.isFinite(x) && x >= 0)) return { err: 'Spreads must be 0 or more.' };
     const s = sensitivities(i);
-    if (!s) return { err: 'Needs a solution from the board first.' };
+    if (!s) return { err: 'Needs a solution from Solstice first.' };
     const parts = {
       group: groupSigmaMrad(i.groupMoa, i.groupShots),
       mv: Math.abs(s.mradPerMvMps) * i.mvSdMps,

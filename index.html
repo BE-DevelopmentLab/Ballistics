@@ -78,7 +78,7 @@
 <body>
 <div class="topbar">
   <h1>Solstice</h1>
-  <div id="batt" class="batt hide" title="Board battery (estimated from cell voltage)"><div class="battBar"><i id="battFill"></i><svg id="battBolt" class="bolt hide" viewBox="0 0 10 14" aria-label="Charging"><path d="M6.5 0 L0.5 8 H4.2 L3 14 L9.5 5.5 H5.8 Z"/></svg></div><span id="battTxt">--</span></div>
+  <div id="batt" class="batt hide" title="Solstice battery (estimated from cell voltage)"><div class="battBar"><i id="battFill"></i><svg id="battBolt" class="bolt hide" viewBox="0 0 10 14" aria-label="Charging"><path d="M6.5 0 L0.5 8 H4.2 L3 14 L9.5 5.5 H5.8 Z"/></svg></div><span id="battTxt">--</span></div>
   <button id="btnConnect">Connect</button>
 </div>
 <div id="status" class="status warn">Not connected</div>
@@ -176,7 +176,7 @@
     <button id="btnLogFill" class="ghost">Fill from solution</button>
     <button id="btnLog">Log shot</button>
   </div>
-  <div id="logNoteOut" class="note">Impact is where the bullet hit compared with where you aimed: 0 and 0 is a centre hit. Conditions are taken from the board when you tap Log shot.</div>
+  <div id="logNoteOut" class="note">Impact is where the bullet hit compared with where you aimed: 0 and 0 is a centre hit. Conditions are taken from Solstice when you tap Log shot.</div>
   <table>
     <thead><tr><th>When</th><th id="thLogRange">Range</th><th id="thLogUp">Dialed</th><th id="thLogHit">Hit at</th><th id="thLogPred">Solver</th><th>Use</th></tr></thead>
     <tbody id="logBody"></tbody>
@@ -189,8 +189,11 @@
   <div id="logListNote" class="note">"Hit at" is the elevation that would have centred the shot. Tap Use to leave a shot out of truing.</div>
 
   <h2 class="gap" style="margin-top:14px">True the load</h2>
-  <button id="btnTrue" class="ghost">True from this profile's shots</button>
-  <div id="trueNote" class="note">Shots from 300 to 600 yd true the muzzle velocity; shots past 600 yd true the BC. Each shot is solved in the conditions it was fired in, on the phone, so the board can be off.</div>
+  <div class="row">
+    <div><label>Muzzle velocity is</label><select id="trueMvSrc"><option value="est">Estimated: true it</option><option value="chrono">From a chronograph: keep it</option></select></div>
+    <div style="display:flex;align-items:flex-end"><button id="btnTrue" class="ghost">True the load</button></div>
+  </div>
+  <div id="trueNote" class="note">Uses this profile's shots from 300 yd out (300 to 600 yd is enough). Each shot is solved in the conditions it was fired in, on the phone, so Solstice can be off. With a chronographed velocity only the BC is trued, which gives a much firmer BC.</div>
   <div class="gap"><button id="btnTrueApply" class="hide">Apply to profile</button></div>
 
 </section>
@@ -213,13 +216,14 @@
     <button id="grpModeScale">Set scale</button>
     <button id="grpModeAim">Aim point</button>
   </div>
-  <canvas id="grpCanvas" class="hide" style="width:100%;border-radius:8px;touch-action:manipulation"></canvas>
+  <canvas id="grpCanvas" class="hide" style="width:100%;border-radius:8px;touch-action:none"></canvas>
   <div class="row3 gap">
     <button id="btnGrpFind" class="ghost">Find holes</button>
     <button id="btnGrpUndo" class="ghost">Undo</button>
-    <button id="btnGrpClear" class="danger">Clear</button>
+    <button id="btnGrpClear" class="ghost">Clear marks</button>
   </div>
-  <div id="grpNote" class="note">Mark holes: tap each hole (tap again to remove it). Find holes looks for them once the scale is set; holes in a black aiming mark need a tap.</div>
+  <div class="gap"><button id="btnGrpRemove" class="danger hide">Remove photo</button></div>
+  <div id="grpNote" class="note">Mark holes: tap each hole (tap again to remove it), or drag a circle to move it. Scale points and the aim point can be dragged too. Find holes looks for holes once the scale is set; holes in a black aiming mark need a tap.</div>
   <div id="grpOut" class="note"></div>
   <div class="gap"><button id="btnGrpUse" class="ghost">Use in hit chance</button></div>
 </section>
@@ -386,7 +390,7 @@
 <section id="secSleep">
   <h2>Power</h2>
   <button id="btnSleep" class="ghost">Sleep mode</button>
-  <div id="sleepNote" class="note">Sleep mode puts the board to sleep to save battery. Wake it with the BOOT or RESET button on the board, then tap Connect.</div>
+  <div id="sleepNote" class="note">Sleep mode puts Solstice to sleep to save battery. Wake it with the BOOT or RESET button on Solstice, then tap Connect.</div>
 </section>
 </main>
 
@@ -429,7 +433,7 @@ const isConnected = () => !!(device && device.gatt && device.gatt.connected && c
 const FIELDS = ['model','bc','mv','sight','zero','zt','zp','zh','range','windDir','windSrc','windManual','slopeSrc','slopeManual',
                 'angUnit','units','cardStart','cardStep','cardCount',
                 'bmass','bdia','blen','btw','btdir','spinOn','aeroOn','corOn','lat','azSrc','azManual','tgtDir','tgtSpeed','tgtDelay',
-                'hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange','ldPowder','ldCharge','ldNotes','grpDist','grpScaleIn'];
+                'hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange','ldPowder','ldCharge','ldNotes','grpDist','grpScaleIn','trueMvSrc'];
 // This handheld has no tilt/compass sensor (the BNO085 comes with the rifle unit in version 2),
 // so slope and shooting direction are always typed in. This also fixes older saved settings.
 const HAS_ORIENTATION_SENSOR = false;
@@ -653,7 +657,7 @@ function renderBattery(pct, charging) {
   $('battFill').style.width = known ? Math.max(pct, pct > 0 ? 4 : 0) + '%' : '0%';
   $('battTxt').textContent = known ? pct + '%' : '--';
   $('battBolt').classList.toggle('hide', !(known && charging));
-  $('batt').title = 'Board battery (read from the fuel gauge)' + (known && charging ? ', charging' : '');
+  $('batt').title = 'Solstice battery (read from the fuel gauge)' + (known && charging ? ', charging' : '');
 }
 function hideBattery() { $('batt').classList.add('hide'); }
 function renderEnv() {
@@ -809,7 +813,7 @@ const profileLabel = () => (activeProfile() || {}).name || '';
 const profileShots = () => shots.filter(s => s.profile === profileLabel());
 // Conditions for a logged shot: the board's live readings, or the zero conditions if there are none.
 function logConditions() {
-  if (lastEnv && lastEnv.bmeOk && isConnected()) return { atm: { tempC: lastEnv.tempC, pressureHpa: lastEnv.pressureHpa, rhPct: lastEnv.rhPct }, src: 'board' };
+  if (lastEnv && lastEnv.bmeOk && isConnected()) return { atm: { tempC: lastEnv.tempC, pressureHpa: lastEnv.pressureHpa, rhPct: lastEnv.rhPct }, src: 'solstice' };
   const c = readConfig();
   return { atm: { tempC: c.zeroTempC, pressureHpa: c.zeroPressureHpa, rhPct: c.zeroRhPct }, src: 'zero' };
 }
@@ -838,7 +842,7 @@ function logShot() {
   const s = ShotLog.makeShot(inp);
   shots.push(s); persistShots();
   $('logImpUp').value = '0'; $('logImpRight').value = '0'; $('logNote').value = '';
-  setNote('logNoteOut', 'Logged ' + fmt(u.range[2](s.rangeM), 0) + ' ' + u.range[0] + (cond.src === 'board' ? ', with the board\'s conditions.' : '. Not connected, so the zero conditions were used.'), cond.src === 'board' ? '' : 'warn');
+  setNote('logNoteOut', 'Logged ' + fmt(u.range[2](s.rangeM), 0) + ' ' + u.range[0] + (cond.src === 'solstice' ? ', with Solstice\'s conditions.' : '. Not connected, so the zero conditions were used.'), cond.src === 'solstice' ? '' : 'warn');
   renderLog();
   return s;
 }
@@ -873,12 +877,13 @@ function exportCsv() {
 function trueLoad() {
   const cfg = readConfig(), err = validateConfig(cfg);
   if (err) { setNote('trueNote', err, 'bad'); return null; }
-  const t = ShotLog.trueFromLog(profileShots(), cfg);
+  const t = ShotLog.trueFromLog(profileShots(), cfg, { mvKnown: $('trueMvSrc').value === 'chrono' });
   if (!t.ok) { trued = null; $('btnTrueApply').classList.add('hide'); setNote('trueNote', t.msg, 'warn'); return t; }
   trued = t;
   const a = angle(), mvF = RIFLE.speed[2](t.muzzleMps), mvOld = RIFLE.speed[2](cfg.muzzleMps);
-  setNote('trueNote', t.msg + ' Muzzle velocity ' + fmt(mvF, 0) + ' fps (was ' + fmt(mvOld, 0) + '), BC ' + fmt(t.bc, 3) + ' (was ' + fmt(cfg.bc, 3) +
-    '). Average miss in elevation: ' + fmt(t.before * a.k, 2) + ' ' + a.name + ' before, ' + fmt(t.after * a.k, 2) + ' after.', '');
+  const pm = (sd, conv, d) => (sd === null || sd === undefined ? '' : ' +/- ' + fmt(conv(sd), d));
+  setNote('trueNote', t.msg + ' Muzzle velocity ' + fmt(mvF, 0) + pm(t.mvSd, RIFLE.speed[2], 0) + ' fps (was ' + fmt(mvOld, 0) + '), BC ' + fmt(t.bc, 3) + pm(t.bcSd, (v) => v, 3) +
+    ' (was ' + fmt(cfg.bc, 3) + '). Average miss in elevation: ' + fmt(t.before * a.k, 2) + ' ' + a.name + ' before, ' + fmt(t.after * a.k, 2) + ' after.', t.weak ? 'warn' : '');
   $('btnTrueApply').classList.remove('hide');
   return t;
 }
@@ -889,7 +894,7 @@ async function applyTrued() {
   const ap = activeProfile();
   if (ap) saveProfile(ap.name); else renderProfiles();
   trued = null; $('btnTrueApply').classList.add('hide');
-  setNote('trueNote', 'Applied' + (ap ? ' and saved to "' + ap.name + '"' : '. Save it as a profile to keep it') + '.' + (isConnected() ? ' Sending to the board.' : ' Connect to send it to the board.'), '');
+  setNote('trueNote', 'Applied' + (ap ? ' and saved to "' + ap.name + '"' : '. Save it as a profile to keep it') + '.' + (isConnected() ? ' Sending to Solstice.' : ' Connect to send it to Solstice.'), '');
   if (isConnected() && await sendConfig()) { await sendRequest(); await requestCard(); }
   return true;
 }
@@ -941,11 +946,25 @@ function renderGroup() {
   drawGroup();
   return grpRes;
 }
+// What is under a finger at p: a hole, a scale point or the aim point (closest first), or null.
+function grpGrabRadius() { const cv = $('grpCanvas'), b = cv.getBoundingClientRect ? cv.getBoundingClientRect() : null; const css = b && b.width ? 22 * cv.width / b.width : 22; return Math.max(css, grpHoleDiaPx()); }
+function grpTarget(p) {
+  const R = grpGrabRadius(), cands = [];
+  grp.pts.forEach((q, i) => cands.push({ kind: 'hole', i, d: Math.hypot(q.x - p.x, q.y - p.y) }));
+  grp.scale.forEach((q, i) => cands.push({ kind: 'scale', i, d: Math.hypot(q.x - p.x, q.y - p.y) }));
+  if (grp.aim) cands.push({ kind: 'aim', i: 0, d: Math.hypot(grp.aim.x - p.x, grp.aim.y - p.y) });
+  const best = cands.filter(c => c.d <= R).sort((a, b) => a.d - b.d)[0];
+  return best || null;
+}
+function grpMoveTo(t, p) {
+  if (t.kind === 'hole') grp.pts[t.i] = p; else if (t.kind === 'scale') grp.scale[t.i] = p; else grp.aim = p;
+  renderGroup();
+}
 function grpTap(p) {
   if (grp.mode === 'scale') { if (grp.scale.length >= 2) grp.scale = []; grp.scale.push(p); grp.last = 'scale'; if (grp.scale.length === 2) setGrpMode('holes'); }
   else if (grp.mode === 'aim') { grp.aim = p; grp.last = 'aim'; setGrpMode('holes'); }
   else {
-    const i = GroupCalc.nearest(grp.pts, p, Math.max(12, grpHoleDiaPx()));
+    const i = GroupCalc.nearest(grp.pts, p, grpGrabRadius());
     if (i >= 0) grp.pts.splice(i, 1); else { grp.pts.push(p); grp.last = 'hole'; }
   }
   renderGroup();
@@ -976,11 +995,19 @@ function grpLoadFile(file) {
   img.onload = () => {
     const cv = $('grpCanvas'), k = Math.min(1, 1600 / img.width);
     cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
-    grp = { pts: [], scale: [], aim: null, mode: 'holes', img, last: null };
-    cv.classList.remove('hide'); setGrpMode('scale'); renderGroup();
+    if (grp.url) URL.revokeObjectURL(grp.url);
+    grp = { pts: [], scale: [], aim: null, mode: 'holes', img, last: null, url };
+    cv.classList.remove('hide'); $('btnGrpRemove').classList.remove('hide'); setGrpMode('scale'); renderGroup();
   };
   img.onerror = () => setNote('grpNote', 'Could not open that photo.', 'bad');
   img.src = url;
+}
+function grpRemovePhoto() {
+  if (grp.url) { try { URL.revokeObjectURL(grp.url); } catch (e) {} }
+  grp = { pts: [], scale: [], aim: null, mode: 'holes', img: null, last: null, url: null };
+  $('grpCanvas').classList.add('hide'); $('btnGrpRemove').classList.add('hide');
+  setGrpMode('holes'); renderGroup();
+  setNote('grpNote', 'Photo removed. Take or choose another.', '');
 }
 function grpUseInHit() {
   if (!grpRes || grpRes.err) { setNote('grpNote', 'Measure a group first.', 'warn'); return false; }
@@ -1023,7 +1050,7 @@ function onSolution(s) {
   if (s.row === 0) { renderSolution(s); return; }
   if (s.row < 1 || s.row > cardRows.length) return;       // stale row from an earlier sweep
   cardRows[s.row - 1] = s;
-  if (!s.ok) setNote('cardNote', 'The board could not solve this card. Check the profile and ranges.', 'bad');
+  if (!s.ok) setNote('cardNote', 'Solstice could not solve this card. Check the profile and ranges.', 'bad');
   else if (cardRows.filter(Boolean).length === cardRows.length) { clearTimeout(cardWait); setNote('cardNote', '', ''); }
   renderCard();
 }
@@ -1036,7 +1063,7 @@ async function connect() {
     setStatus('Choose your device...', 'warn');
     hideBattery();
     device = await navigator.bluetooth.requestDevice({ filters: [{ services: [Proto.UUID.service] }] });
-    device.addEventListener('gattserverdisconnected', () => { hideBattery(); if (sleeping) setStatus('Board asleep. Press BOOT or RESET to wake it, then tap Connect.', 'warn'); else setStatus('Disconnected. Tap Connect to retry.', 'warn'); });
+    device.addEventListener('gattserverdisconnected', () => { hideBattery(); if (sleeping) setStatus('Solstice asleep. Press BOOT or RESET to wake it, then tap Connect.', 'warn'); else setStatus('Disconnected. Tap Connect to retry.', 'warn'); });
     setStatus('Connecting...', 'warn');
     server = await device.gatt.connect();
     const svc = await server.getPrimaryService(Proto.UUID.service);
@@ -1059,21 +1086,21 @@ async function connect() {
 // ---- sleep (a safe stand-in for a power switch) -------------------------------------------
 function disarmSleep() { sleepArm = false; clearTimeout(sleepTimer); $('btnSleep').textContent = 'Sleep mode'; }
 async function sleepBoard() {
-  if (!isConnected() || !chars.request) { setNote('sleepNote', 'Connect to the board first.', 'warn'); return false; }
+  if (!isConnected() || !chars.request) { setNote('sleepNote', 'Connect to Solstice first.', 'warn'); return false; }
   try {
     sleeping = true;
     // A plain valid request with only the sleep bit set, so it never depends on what is typed in the form.
     await writeChar(chars.request, Proto.encodeRequest({ sleep: true, rangeM: 100, windClockDeg: 0, windSpeedMps: 0, slopeDeg: 0 }));
   } catch (e) { sleeping = false; setNote('sleepNote', 'Could not send: ' + e.message, 'bad'); return false; }
-  setNote('sleepNote', 'Sleep sent. Press the BOOT or RESET button on the board to wake it, then tap Connect.', '');
-  setStatus('Board asleep. Press BOOT or RESET to wake it, then tap Connect.', 'warn');
+  setNote('sleepNote', 'Sleep sent. Press the BOOT or RESET button on Solstice to wake it, then tap Connect.', '');
+  setStatus('Solstice asleep. Press BOOT or RESET to wake it, then tap Connect.', 'warn');
   hideBattery();
   setTimeout(() => { try { if (device && device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (e) {} }, 600);
   return true;
 }
 // Two taps, like Delete, so a stray touch cannot switch the board off.
 function onSleepClick() {
-  if (!isConnected()) { setNote('sleepNote', 'Connect to the board first.', 'warn'); return; }
+  if (!isConnected()) { setNote('sleepNote', 'Connect to Solstice first.', 'warn'); return; }
   if (!sleepArm) { sleepArm = true; $('btnSleep').textContent = 'Tap again for sleep mode'; sleepTimer = setTimeout(disarmSleep, 4000); return; }
   disarmSleep(); sleepBoard();
 }
@@ -1099,7 +1126,7 @@ async function requestCard() {
   cardRows = new Array(c.count).fill(null);
   renderCard();
   if (!isConnected()) { setNote('cardNote', 'Connect to build a card.', 'warn'); return; }
-  setNote('cardNote', 'Waiting for the board...', '');
+  setNote('cardNote', 'Waiting for Solstice...', '');
   try { await writeChar(chars.card, Proto.encodeCard(c)); }
   catch (e) { setNote('cardNote', 'Send failed: ' + e.message, 'bad'); return; }
   clearTimeout(cardWait);
@@ -1197,6 +1224,7 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').ca
   };
   $('btnTrue').onclick = () => { setNote('trueNote', 'Working...', ''); setTimeout(trueLoad, 30); };
   $('btnTrueApply').onclick = () => applyTrued();
+  $('trueMvSrc').addEventListener('input', () => { save(); trued = null; $('btnTrueApply').classList.add('hide'); });
   $('chronoIn').addEventListener('input', renderChrono);
 
   // Group from a photo: the two buttons open the camera or the gallery through hidden file inputs.
@@ -1206,14 +1234,34 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').ca
   $('grpModeHoles').onclick = () => setGrpMode('holes');
   $('grpModeScale').onclick = () => setGrpMode('scale');
   $('grpModeAim').onclick = () => setGrpMode('aim');
-  $('grpCanvas').addEventListener('click', (ev) => {
-    const cv = $('grpCanvas'), b = cv.getBoundingClientRect();
-    grpTap({ x: (ev.clientX - b.left) * cv.width / b.width, y: (ev.clientY - b.top) * cv.height / b.height });
+  // Tap = add/remove a hole (or set scale/aim). Press on a circle and move = drag it.
+  const cvs = $('grpCanvas');
+  let drag = null;
+  const at = (ev) => { const b = cvs.getBoundingClientRect(); return { x: (ev.clientX - b.left) * cvs.width / b.width, y: (ev.clientY - b.top) * cvs.height / b.height, k: cvs.width / b.width }; };
+  cvs.addEventListener('pointerdown', (ev) => {
+    const p = at(ev);
+    drag = { start: p, target: grp.mode === 'holes' || grp.mode === 'scale' || grp.mode === 'aim' ? grpTarget(p) : null, moved: false };
+    try { cvs.setPointerCapture(ev.pointerId); } catch (e) {}
+    ev.preventDefault();
   });
+  cvs.addEventListener('pointermove', (ev) => {
+    if (!drag || !drag.target) return;
+    const p = at(ev);
+    if (!drag.moved && Math.hypot(p.x - drag.start.x, p.y - drag.start.y) < 8 * p.k) return;   // small wobble is still a tap
+    drag.moved = true; grpMoveTo(drag.target, { x: p.x, y: p.y });
+  });
+  cvs.addEventListener('pointerup', (ev) => {
+    if (!drag) return;
+    const d = drag; drag = null;
+    if (!d.moved) grpTap({ x: d.start.x, y: d.start.y });
+    ev.preventDefault();
+  });
+  cvs.addEventListener('pointercancel', () => { drag = null; });
   $('btnGrpFind').onclick = () => grpFind();
   $('btnGrpUndo').onclick = () => grpUndo();
   $('btnGrpClear').onclick = () => { grp.pts = []; grp.aim = null; grp.last = null; renderGroup(); };
   $('btnGrpUse').onclick = () => grpUseInHit();
+  $('btnGrpRemove').onclick = () => grpRemovePhoto();
   ['grpDist', 'grpScaleIn'].forEach(f => $(f).addEventListener('input', () => { save(); renderGroup(); }));
   ['ldPowder', 'ldCharge', 'ldNotes'].forEach(f => $(f).addEventListener('input', () => save()));
   loadLoadTests(); renderLoadTests(); renderGroup();
