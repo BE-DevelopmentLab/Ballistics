@@ -34,12 +34,15 @@
   .batt.low .battBar i { background:var(--warn); } .batt.crit .battBar i { background:var(--bad); }
   .batt.low, .batt.crit { color:var(--fg); }
   .status::before { content:'\25CF  '; }
-  .tabs { display:grid; grid-template-columns:1fr 1fr; gap:3px; background:#0d100c; border:1px solid var(--line); border-radius:10px; padding:3px; margin-bottom:12px; }
+  .tabs { display:grid; grid-template-columns:1fr 1fr 1.6fr; gap:3px; background:#0d100c; border:1px solid var(--line); border-radius:10px; padding:3px; margin-bottom:12px; }
   .tabs button { background:transparent; color:var(--dim); border:0; padding:8px; }
   .tabs button.on { background:var(--acc); color:#10130f; }
   #app { display:flex; flex-direction:column; }
   #app.simple .adv-only { display:none; }
   #app.simple #secProf { order:-1; }
+  #app:not(.load) .load-only { display:none; }
+  #app.load > section:not(.load-tab) { display:none; }
+  #app.load #secProf { order:-1; }
   .compass { display:block; width:230px; max-width:100%; margin:6px auto 0; touch-action:none; cursor:pointer; user-select:none; -webkit-user-select:none; }
   .compass text { font-size:11px; fill:var(--dim); text-anchor:middle; dominant-baseline:middle; }
   .windread { display:grid; grid-template-columns:56px 1fr 56px; gap:8px; align-items:center; text-align:center; margin-top:4px; }
@@ -63,6 +66,10 @@
   td { text-align:right; padding:6px; border-bottom:1px solid #20271c; }
   th:first-child, td:first-child { text-align:left; }
   td.up { color:var(--acc); font-weight:600; }
+  td button.use { width:auto; padding:2px 8px; font-size:13px; }
+  tr.off td { color:var(--dim); text-decoration:line-through; }
+  tr.off td:last-child { text-decoration:none; }
+  .grpmode { grid-template-columns:1fr 1fr 1fr; }
   .hitbig { text-align:center; background:#0d100c; border:1px solid var(--line); border-radius:10px; padding:8px; }
   .hitbig b { display:block; font-size:34px; font-variant-numeric:tabular-nums; }
   .hitbig span { font-size:12px; color:var(--dim); }
@@ -78,6 +85,7 @@
 <div class="tabs">
   <button id="tabSimple" class="on">Simple</button>
   <button id="tabAdv">Advanced</button>
+  <button id="tabLoad">Load development</button>
 </div>
 
 <main id="app" class="simple">
@@ -138,6 +146,103 @@
     <tbody id="cardBody"></tbody>
   </table>
   <div class="note">Uses the wind, slope and conditions below. Wind column: R means dial right. Lead column fills in when a moving target is set.</div>
+</section>
+
+<section id="secRecipe" class="load-only load-tab">
+  <h2>Load</h2>
+  <div class="row">
+    <div><label>Powder</label><input id="ldPowder" type="text" maxlength="60" placeholder="e.g. Varget"></div>
+    <div><label>Charge weight (gr)</label><input id="ldCharge" type="number" inputmode="decimal" step="0.1" placeholder="e.g. 24.5"></div>
+  </div>
+  <div class="gap"><label>Other load notes</label><input id="ldNotes" type="text" maxlength="120" placeholder="optional: primer, brass, seating depth"></div>
+  <div class="note">Saved with every shot you log and every load test, so loads can be compared below.</div>
+</section>
+
+<section id="secLog" class="load-only load-tab">
+  <h2>Shot log</h2>
+  <div class="row">
+    <div><label id="lLogRange">Range</label><input id="logRange" type="number" inputmode="decimal" placeholder="from Shot"></div>
+    <div><label id="lLogUp">Elevation used (UP)</label><input id="logUp" type="number" inputmode="decimal" step="0.1" placeholder="from solution"></div>
+  </div>
+  <div class="row gap">
+    <div><label id="lLogImpUp">Impact: high + / low -</label><input id="logImpUp" type="number" inputmode="decimal" step="0.1" value="0"></div>
+    <div><label id="lLogImpRight">Impact: right + / left -</label><input id="logImpRight" type="number" inputmode="decimal" step="0.1" value="0"></div>
+  </div>
+  <div class="row gap">
+    <div><label id="lLogRight">Windage used (R +)</label><input id="logRight" type="number" inputmode="decimal" step="0.1" placeholder="from solution"></div>
+    <div><label>Note</label><input id="logNote" type="text" maxlength="200" placeholder="optional"></div>
+  </div>
+  <div class="row gap">
+    <button id="btnLogFill" class="ghost">Fill from solution</button>
+    <button id="btnLog">Log shot</button>
+  </div>
+  <div id="logNoteOut" class="note">Impact is where the bullet hit compared with where you aimed: 0 and 0 is a centre hit. Conditions are taken from the board when you tap Log shot.</div>
+  <table>
+    <thead><tr><th>When</th><th id="thLogRange">Range</th><th id="thLogUp">Dialed</th><th id="thLogHit">Hit at</th><th id="thLogPred">Solver</th><th>Use</th></tr></thead>
+    <tbody id="logBody"></tbody>
+  </table>
+  <div class="row3 gap">
+    <button id="btnLogCsv" class="ghost">Export CSV</button>
+    <button id="btnLogUndo" class="ghost">Remove last</button>
+    <button id="btnLogClear" class="danger">Clear log</button>
+  </div>
+  <div id="logListNote" class="note">"Hit at" is the elevation that would have centred the shot. Tap Use to leave a shot out of truing.</div>
+
+  <h2 class="gap" style="margin-top:14px">True the load</h2>
+  <button id="btnTrue" class="ghost">True from this profile's shots</button>
+  <div id="trueNote" class="note">Shots from 300 to 600 yd true the muzzle velocity; shots past 600 yd true the BC. Each shot is solved in the conditions it was fired in, on the phone, so the board can be off.</div>
+  <div class="gap"><button id="btnTrueApply" class="hide">Apply to profile</button></div>
+
+</section>
+
+<section id="secGroup" class="load-only load-tab">
+  <h2>Group from a photo</h2>
+  <div class="row">
+    <button id="btnGrpCam">Take photo</button>
+    <button id="btnGrpPick" class="ghost">Choose photo</button>
+  </div>
+  <input id="grpCam" type="file" accept="image/*" capture="environment" class="hide">
+  <input id="grpPick" type="file" accept="image/*" class="hide">
+  <div class="note">Shoot the target square-on and fill the frame. Then tap two points a known distance apart (grid lines or a ruler) to set the scale.</div>
+  <div class="row gap">
+    <div><label id="lGrpDist">Target distance</label><input id="grpDist" type="number" inputmode="decimal" value="100"></div>
+    <div><label>Scale points are (in) apart</label><input id="grpScaleIn" type="number" inputmode="decimal" step="0.1" value="1"></div>
+  </div>
+  <div class="tabs gap grpmode">
+    <button id="grpModeHoles" class="on">Mark holes</button>
+    <button id="grpModeScale">Set scale</button>
+    <button id="grpModeAim">Aim point</button>
+  </div>
+  <canvas id="grpCanvas" class="hide" style="width:100%;border-radius:8px;touch-action:manipulation"></canvas>
+  <div class="row3 gap">
+    <button id="btnGrpFind" class="ghost">Find holes</button>
+    <button id="btnGrpUndo" class="ghost">Undo</button>
+    <button id="btnGrpClear" class="danger">Clear</button>
+  </div>
+  <div id="grpNote" class="note">Mark holes: tap each hole (tap again to remove it). Find holes looks for them once the scale is set; holes in a black aiming mark need a tap.</div>
+  <div id="grpOut" class="note"></div>
+  <div class="gap"><button id="btnGrpUse" class="ghost">Use in hit chance</button></div>
+</section>
+
+<section id="secTests" class="load-only load-tab">
+  <h2>Load tests</h2>
+  <h2 class="gap" style="margin-top:14px">Chronograph string</h2>
+  <label>Velocities (fps), separated by spaces, commas or new lines</label>
+  <textarea id="chronoIn" rows="3" style="width:100%;font:inherit;color:var(--fg);background:#0d100c;border:1px solid var(--line);border-radius:8px;padding:10px" placeholder="e.g. 2551 2560 2548 2565 2556"></textarea>
+  <div id="chronoOut" class="note"></div>
+  <div class="row gap">
+    <button id="btnChronoMv" class="ghost">Use average as MV</button>
+    <button id="btnChronoSd" class="ghost">Use SD in hit chance</button>
+  </div>
+  <div class="row gap">
+    <button id="btnTestSave">Save load test</button>
+    <button id="btnTestUndo" class="ghost">Remove last</button>
+  </div>
+  <div id="testNote" class="note">Save load test stores the powder, charge, chronograph string and the measured group together.</div>
+  <table>
+    <thead><tr><th>Powder</th><th>gr</th><th>Avg fps</th><th>SD</th><th>ES</th><th>Group MOA</th></tr></thead>
+    <tbody id="testBody"></tbody>
+  </table>
 </section>
 
 <section id="secShot">
@@ -233,7 +338,7 @@
   </div>
 </section>
 
-<section id="secProf">
+<section id="secProf" class="load-tab">
   <h2>Saved profiles</h2>
   <label>Profile</label>
   <select id="profileSel"></select>
@@ -287,6 +392,9 @@
 
 <script src="protocol.js"></script>
 <script src="hitprob.js"></script>
+<script src="solver.js"></script>
+<script src="shotlog.js"></script>
+<script src="groupcalc.js"></script>
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);
@@ -321,7 +429,7 @@ const isConnected = () => !!(device && device.gatt && device.gatt.connected && c
 const FIELDS = ['model','bc','mv','sight','zero','zt','zp','zh','range','windDir','windSrc','windManual','slopeSrc','slopeManual',
                 'angUnit','units','cardStart','cardStep','cardCount',
                 'bmass','bdia','blen','btw','btdir','spinOn','aeroOn','corOn','lat','azSrc','azManual','tgtDir','tgtSpeed','tgtDelay',
-                'hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange'];
+                'hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange','ldPowder','ldCharge','ldNotes','grpDist','grpScaleIn'];
 // This handheld has no tilt/compass sensor (the BNO085 comes with the rifle unit in version 2),
 // so slope and shooting direction are always typed in. This also fixes older saved settings.
 const HAS_ORIENTATION_SENSOR = false;
@@ -370,12 +478,16 @@ function windFromPoint(dx, dy) {
 function setWindDir(d) { $('windDir').value = String(norm360(d)); renderWindDir(); $('windDir')._fire ? $('windDir')._fire('input') : $('windDir').dispatchEvent(new Event('input')); }
 
 // ---- Simple / Advanced tabs ---------------------------------------------------------
+// Load development is its own tab: saved profile picker plus the shot log, truing and chronograph.
 function setTab(t) {
-  const simple = t !== 'adv';
+  if (t !== 'adv' && t !== 'load') t = 'simple';
+  const simple = t === 'simple', load = t === 'load';
   $('app').classList.toggle('simple', simple);
+  $('app').classList.toggle('load', load);
   $('tabSimple').classList.toggle('on', simple);
-  $('tabAdv').classList.toggle('on', !simple);
-  try { localStorage.setItem('bc.tab', simple ? 'simple' : 'adv'); } catch (e) {}
+  $('tabAdv').classList.toggle('on', t === 'adv');
+  $('tabLoad').classList.toggle('on', load);
+  try { localStorage.setItem('bc.tab', t); } catch (e) {}
   refreshSlopeNote();
 }
 const isSimple = () => $('app').classList.contains('simple');
@@ -678,7 +790,7 @@ function refreshLabels() {
   $('manualWindBox').classList.toggle('hide', $('windSrc').value !== 'manual');
   $('manualSlopeBox').classList.toggle('hide', $('slopeSrc').value === 'imu');
   refreshSlopeNote();
-  renderEnv(); renderSolution(lastSol); renderCard(); renderProfiles();
+  renderEnv(); renderSolution(lastSol); renderCard(); renderProfiles(); if (typeof renderLog === 'function' && $('logBody')) { renderLog(); renderLoadTests(); }
 }
 
 function updateEarthNote() {
@@ -686,6 +798,222 @@ function updateEarthNote() {
   if (err) setNote('earthNote', err, 'bad');
   else if (($('spinOn').value === 'on' || $('aeroOn').value === 'on') && !bulletComplete(readConfig())) setNote('earthNote', 'Spin drift and aerodynamic jump need bullet weight, diameter, length and twist (Rifle and load).', 'warn');
   else setNote('earthNote', 'Spin drift and aerodynamic jump need the bullet details under Rifle and load. Coriolis is only applied to shots beyond 1000 yd (914 m).', '');
+}
+
+// ---- shot log and truing (logic in shotlog.js, solver copy in solver.js) ------------------------
+const LKEY = 'bc.shots.v1';
+let shots = [], logClearArm = false, trued = null;
+function loadShots() { try { const o = JSON.parse(localStorage.getItem(LKEY) || '[]'); if (Array.isArray(o)) shots = o; } catch (e) {} }
+function persistShots() { try { localStorage.setItem(LKEY, JSON.stringify(shots)); } catch (e) {} }
+const profileLabel = () => (activeProfile() || {}).name || '';
+const profileShots = () => shots.filter(s => s.profile === profileLabel());
+// Conditions for a logged shot: the board's live readings, or the zero conditions if there are none.
+function logConditions() {
+  if (lastEnv && lastEnv.bmeOk && isConnected()) return { atm: { tempC: lastEnv.tempC, pressureHpa: lastEnv.pressureHpa, rhPct: lastEnv.rhPct }, src: 'board' };
+  const c = readConfig();
+  return { atm: { tempC: c.zeroTempC, pressureHpa: c.zeroPressureHpa, rhPct: c.zeroRhPct }, src: 'zero' };
+}
+function fillLogFromSolution() {
+  const u = unit(), a = angle();
+  $('logRange').value = String($('range').value);
+  if (lastSol && lastSol.ok) { $('logUp').value = +(lastSol.elevationMrad * a.k).toFixed(2); $('logRight').value = +(lastSol.windageMrad * a.k).toFixed(2); }
+  return u;
+}
+function logShot() {
+  const u = unit(), a = angle(), r = readRequest(), cond = logConditions();
+  const blank = (id) => String($(id).value).trim() === '';
+  if (blank('logRange')) $('logRange').value = String($('range').value);
+  if (blank('logUp') && lastSol && lastSol.ok) fillLogFromSolution();
+  const inp = {
+    cfg: readConfig(), profile: profileLabel(), atm: cond.atm, atmSource: cond.src,
+    shot: { windSpeedMps: lastSol && lastSol.ok ? lastSol.windMps : r.windSpeedMps, windClockDeg: r.windClockDeg, slopeDeg: r.slopeDeg,
+            spinDrift: r.spinDrift, aeroJump: r.aeroJump, coriolis: r.coriolis, latitudeDeg: r.latitudeDeg, azimuthDeg: r.azimuthDeg },
+    rangeM: u.range[1](fieldNum('logRange')), holdUpMrad: fieldNum('logUp') / a.k,
+    holdRightMrad: (blank('logRight') ? 0 : fieldNum('logRight')) / a.k,
+    impactUpMrad: (blank('logImpUp') ? 0 : fieldNum('logImpUp')) / a.k, impactRightMrad: (blank('logImpRight') ? 0 : fieldNum('logImpRight')) / a.k,
+    note: $('logNote').value, powder: $('ldPowder').value, chargeGr: $('ldCharge').value,
+  };
+  const err = validateConfig(inp.cfg) || ShotLog.validateShot(inp);
+  if (err) { setNote('logNoteOut', err, 'bad'); return null; }
+  const s = ShotLog.makeShot(inp);
+  shots.push(s); persistShots();
+  $('logImpUp').value = '0'; $('logImpRight').value = '0'; $('logNote').value = '';
+  setNote('logNoteOut', 'Logged ' + fmt(u.range[2](s.rangeM), 0) + ' ' + u.range[0] + (cond.src === 'board' ? ', with the board\'s conditions.' : '. Not connected, so the zero conditions were used.'), cond.src === 'board' ? '' : 'warn');
+  renderLog();
+  return s;
+}
+function renderLog() {
+  const u = unit(), a = angle(), list = profileShots().slice(-30).reverse();
+  $('lLogRange').textContent = 'Range (' + u.range[0] + ')';
+  $('lLogUp').textContent = 'Elevation used (UP ' + a.name + ')';
+  $('lLogRight').textContent = 'Windage used (R +, ' + a.name + ')';
+  $('lLogImpUp').textContent = 'Impact: high + / low - (' + a.name + ')';
+  $('lLogImpRight').textContent = 'Impact: right + / left - (' + a.name + ')';
+  $('thLogRange').textContent = u.range[0];
+  const when = (t) => { const d = new Date(t); return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  $('logBody').innerHTML = list.map(s => `<tr class="${s.use === false ? 'off' : ''}"><td>${when(s.time)}</td><td>${fmt(u.range[2](s.rangeM), 0)}</td>` +
+    `<td>${fmt(s.holdUpMrad * a.k, 2)}</td><td class="up">${fmt(ShotLog.observedUp(s) * a.k, 2)}</td><td>${s.predUpMrad === null ? '--' : fmt(s.predUpMrad * a.k, 2)}</td>` +
+    `<td><button class="ghost use" data-id="${esc(s.id)}">${s.use === false ? 'off' : 'on'}</button></td></tr>`).join('');
+  const n = profileShots().length;
+  setNote('logListNote', n ? n + ' shot(s) logged with ' + (profileLabel() ? '"' + profileLabel() + '"' : 'no saved profile') + '. "Hit at" is the elevation that would have centred the shot. Tap on/off to leave a shot out of truing.'
+    : 'No shots logged with ' + (profileLabel() ? '"' + profileLabel() + '"' : 'this (unsaved) profile') + ' yet.', '');
+}
+function toggleShot(id) { const s = shots.find(x => x.id === id); if (!s) return; s.use = s.use === false; persistShots(); renderLog(); }
+function exportCsv() {
+  const list = profileShots().length ? profileShots() : shots;
+  if (!list.length) { setNote('logListNote', 'Nothing to export yet.', 'warn'); return null; }
+  const csv = ShotLog.toCsv(list);
+  try {
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), el = document.createElement('a');
+    el.href = url; el.download = 'solstice-shots-' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) { setNote('logListNote', 'Could not save the file: ' + e.message, 'bad'); }
+  return csv;
+}
+function trueLoad() {
+  const cfg = readConfig(), err = validateConfig(cfg);
+  if (err) { setNote('trueNote', err, 'bad'); return null; }
+  const t = ShotLog.trueFromLog(profileShots(), cfg);
+  if (!t.ok) { trued = null; $('btnTrueApply').classList.add('hide'); setNote('trueNote', t.msg, 'warn'); return t; }
+  trued = t;
+  const a = angle(), mvF = RIFLE.speed[2](t.muzzleMps), mvOld = RIFLE.speed[2](cfg.muzzleMps);
+  setNote('trueNote', t.msg + ' Muzzle velocity ' + fmt(mvF, 0) + ' fps (was ' + fmt(mvOld, 0) + '), BC ' + fmt(t.bc, 3) + ' (was ' + fmt(cfg.bc, 3) +
+    '). Average miss in elevation: ' + fmt(t.before * a.k, 2) + ' ' + a.name + ' before, ' + fmt(t.after * a.k, 2) + ' after.', '');
+  $('btnTrueApply').classList.remove('hide');
+  return t;
+}
+async function applyTrued() {
+  if (!trued) return false;
+  $('mv').value = +RIFLE.speed[2](trued.muzzleMps).toFixed(0); $('bc').value = +trued.bc.toFixed(3);
+  save();
+  const ap = activeProfile();
+  if (ap) saveProfile(ap.name); else renderProfiles();
+  trued = null; $('btnTrueApply').classList.add('hide');
+  setNote('trueNote', 'Applied' + (ap ? ' and saved to "' + ap.name + '"' : '. Save it as a profile to keep it') + '.' + (isConnected() ? ' Sending to the board.' : ' Connect to send it to the board.'), '');
+  if (isConnected() && await sendConfig()) { await sendRequest(); await requestCard(); }
+  return true;
+}
+function renderChrono() {
+  const st = ShotLog.chronoStats(ShotLog.parseVelocities($('chronoIn').value));
+  $('chronoOut').textContent = st ? st.n + ' shots: average ' + fmt(st.mean, 0) + ' fps, ES ' + fmt(st.es, 0) + ', SD ' + fmt(st.sd, 1) + (st.n < 5 ? '. Ten or more shots give a steadier SD.' : '.') : '';
+  return st;
+}
+
+// ---- group from a photo (maths and hole finder in groupcalc.js) -------------------------------
+// Everything is in canvas pixels; the photo is drawn at most 1600 px wide.
+let grp = { pts: [], scale: [], aim: null, mode: 'holes', img: null, last: null }, grpRes = null;
+function grpPxPerIn() { return grp.scale.length === 2 ? GroupCalc.scaleFrom(grp.scale[0], grp.scale[1], fieldNum('grpScaleIn')) : null; }
+function grpDistYd() { return unit().range[1](fieldNum('grpDist')) / 0.9144; }
+function grpHoleDiaPx() { const c = readConfig(), ppi = grpPxPerIn(); return ppi ? (c.diameterM > 0 ? c.diameterM / 0.0254 : 0.224) * ppi : 0; }
+function setGrpMode(m) {
+  grp.mode = m;
+  ['Holes', 'Scale', 'Aim'].forEach(k => $('grpMode' + k).classList.toggle('on', m === k.toLowerCase()));
+  setNote('grpNote', m === 'scale' ? 'Tap two points a known distance apart (set the distance above).' : m === 'aim' ? 'Tap where you aimed.' : 'Tap each hole (tap again to remove it).', '');
+}
+function drawGroup() {
+  const cv = $('grpCanvas');
+  if (!grp.img || !cv.getContext) return;
+  const g = cv.getContext('2d'), r = Math.max(6, grpHoleDiaPx() / 2 || cv.width / 120), lw = Math.max(2, cv.width / 400);
+  g.drawImage(grp.img, 0, 0, cv.width, cv.height);
+  g.lineWidth = lw;
+  if (grp.scale.length) {
+    g.strokeStyle = '#e5a04a'; g.fillStyle = '#e5a04a'; g.beginPath(); g.moveTo(grp.scale[0].x, grp.scale[0].y);
+    if (grp.scale[1]) g.lineTo(grp.scale[1].x, grp.scale[1].y); g.stroke();
+    grp.scale.forEach(p => { g.beginPath(); g.arc(p.x, p.y, lw * 2.5, 0, 7); g.fill(); });
+  }
+  g.strokeStyle = '#b6d36a';
+  grp.pts.forEach(p => { g.beginPath(); g.arc(p.x, p.y, r * 1.3, 0, 7); g.stroke(); });
+  if (grp.aim) { g.strokeStyle = '#e26b5a'; const a = grp.aim, k = r * 2; g.beginPath(); g.moveTo(a.x - k, a.y); g.lineTo(a.x + k, a.y); g.moveTo(a.x, a.y - k); g.lineTo(a.x, a.y + k); g.stroke(); }
+  if (grpRes && !grpRes.err) { g.strokeStyle = '#ffffff'; const c = grpRes.center, k = r; g.beginPath(); g.moveTo(c.x - k, c.y - k); g.lineTo(c.x + k, c.y + k); g.moveTo(c.x + k, c.y - k); g.lineTo(c.x - k, c.y + k); g.stroke(); }
+}
+function renderGroup() {
+  $('lGrpDist').textContent = 'Target distance (' + unit().range[0] + ')';
+  const ppi = grpPxPerIn();
+  grpRes = GroupCalc.stats(grp.pts, ppi, grpDistYd(), grp.aim);
+  if (grpRes.err) $('grpOut').textContent = grp.pts.length + ' hole(s) marked. ' + grpRes.err;
+  else {
+    const off = grpRes.offUpIn === null ? ' Tap Aim point to see where the group sits.'
+      : ' Centre ' + fmt(Math.abs(grpRes.offUpIn), 2) + ' in ' + (grpRes.offUpIn >= 0 ? 'high' : 'low') + ', ' + fmt(Math.abs(grpRes.offRightIn), 2) + ' in ' + (grpRes.offRightIn >= 0 ? 'right' : 'left') +
+        ' (' + fmt(Math.abs(grpRes.offUpMoa), 2) + ' / ' + fmt(Math.abs(grpRes.offRightMoa), 2) + ' MOA).';
+    $('grpOut').textContent = grpRes.n + ' shots: group ' + fmt(grpRes.esIn, 2) + ' in = ' + fmt(grpRes.esMoa, 2) + ' MOA (centre to centre), mean radius ' +
+      fmt(grpRes.meanRadiusIn, 2) + ' in = ' + fmt(grpRes.meanRadiusMoa, 2) + ' MOA, ' + fmt(grpRes.widthIn, 2) + ' wide x ' + fmt(grpRes.heightIn, 2) + ' tall.' + off;
+  }
+  drawGroup();
+  return grpRes;
+}
+function grpTap(p) {
+  if (grp.mode === 'scale') { if (grp.scale.length >= 2) grp.scale = []; grp.scale.push(p); grp.last = 'scale'; if (grp.scale.length === 2) setGrpMode('holes'); }
+  else if (grp.mode === 'aim') { grp.aim = p; grp.last = 'aim'; setGrpMode('holes'); }
+  else {
+    const i = GroupCalc.nearest(grp.pts, p, Math.max(12, grpHoleDiaPx()));
+    if (i >= 0) grp.pts.splice(i, 1); else { grp.pts.push(p); grp.last = 'hole'; }
+  }
+  renderGroup();
+}
+function grpUndo() {
+  if (grp.last === 'scale' && grp.scale.length) grp.scale.pop();
+  else if (grp.last === 'aim') grp.aim = null;
+  else grp.pts.pop();
+  grp.last = grp.pts.length ? 'hole' : null;
+  renderGroup();
+}
+function grpFind() {
+  const cv = $('grpCanvas'), d = grpHoleDiaPx();
+  if (!grp.img || !cv.getContext) { setNote('grpNote', 'Take or choose a photo first.', 'warn'); return 0; }
+  if (!d) { setNote('grpNote', 'Set the scale first (Set scale, then tap two points).', 'warn'); return 0; }
+  const g = cv.getContext('2d'); g.drawImage(grp.img, 0, 0, cv.width, cv.height);
+  const px = g.getImageData(0, 0, cv.width, cv.height).data, gray = new Uint8Array(cv.width * cv.height);
+  for (let i = 0; i < gray.length; i++) gray[i] = (px[4 * i] * 77 + px[4 * i + 1] * 150 + px[4 * i + 2] * 29) >> 8;
+  let added = 0;
+  GroupCalc.findHoles(gray, cv.width, cv.height, d).forEach(f => { if (GroupCalc.nearest(grp.pts, f, d) < 0) { grp.pts.push({ x: f.x, y: f.y }); added++; } });
+  setNote('grpNote', added ? 'Found ' + added + ' hole(s). Check them: tap a wrong one to remove it, tap any missed hole to add it.' : 'No holes found. Tap them in by hand.', added ? '' : 'warn');
+  renderGroup();
+  return added;
+}
+function grpLoadFile(file) {
+  if (!file) return;
+  const url = URL.createObjectURL(file), img = new Image();
+  img.onload = () => {
+    const cv = $('grpCanvas'), k = Math.min(1, 1600 / img.width);
+    cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+    grp = { pts: [], scale: [], aim: null, mode: 'holes', img, last: null };
+    cv.classList.remove('hide'); setGrpMode('scale'); renderGroup();
+  };
+  img.onerror = () => setNote('grpNote', 'Could not open that photo.', 'bad');
+  img.src = url;
+}
+function grpUseInHit() {
+  if (!grpRes || grpRes.err) { setNote('grpNote', 'Measure a group first.', 'warn'); return false; }
+  $('hitGroup').value = +grpRes.esMoa.toFixed(2);
+  $('hitShots').value = String(grpRes.n <= 3 ? 3 : grpRes.n < 8 ? 5 : 10);
+  save(); renderHit(lastSol);
+  setNote('grpNote', 'Hit chance now uses a ' + fmt(grpRes.esMoa, 2) + ' MOA ' + $('hitShots').value + '-shot group.', '');
+  return true;
+}
+
+// ---- load tests: powder, charge, chronograph and group side by side -----------------------------
+const TKEY = 'bc.loadtests.v1';
+let loadTests = [];
+function loadLoadTests() { try { const o = JSON.parse(localStorage.getItem(TKEY) || '[]'); if (Array.isArray(o)) loadTests = o; } catch (e) {} }
+function saveLoadTest() {
+  const st = ShotLog.chronoStats(ShotLog.parseVelocities($('chronoIn').value)), g = grpRes && !grpRes.err ? grpRes : null;
+  const powder = String($('ldPowder').value).trim(), charge = fieldNum('ldCharge');
+  if (!powder && !Number.isFinite(charge)) { setNote('testNote', 'Enter the powder and charge weight under Load first.', 'bad'); return null; }
+  if (!st && !g) { setNote('testNote', 'Enter a chronograph string or measure a group first.', 'bad'); return null; }
+  const t = { time: Date.now(), profile: profileLabel(), powder, chargeGr: Number.isFinite(charge) ? charge : null, notes: String($('ldNotes').value).trim(),
+    velocities: st ? ShotLog.parseVelocities($('chronoIn').value) : [], avgFps: st ? st.mean : null, sdFps: st ? st.sd : null, esFps: st ? st.es : null,
+    groupMoa: g ? g.esMoa : null, groupIn: g ? g.esIn : null, groupShots: g ? g.n : null, distYd: g ? grpDistYd() : null };
+  loadTests.push(t);
+  try { localStorage.setItem(TKEY, JSON.stringify(loadTests)); } catch (e) {}
+  setNote('testNote', 'Saved ' + (powder || 'load') + (t.chargeGr !== null ? ' ' + t.chargeGr + ' gr' : '') + '.', '');
+  renderLoadTests();
+  return t;
+}
+function renderLoadTests() {
+  const list = loadTests.filter(t => t.profile === profileLabel()).slice().sort((a, b) => (a.powder || '').localeCompare(b.powder || '') || (a.chargeGr || 0) - (b.chargeGr || 0));
+  $('testBody').innerHTML = list.map(t => `<tr><td>${esc(t.powder || '--')}</td><td>${t.chargeGr === null ? '--' : fmt(t.chargeGr, 1)}</td>` +
+    `<td>${t.avgFps === null ? '--' : fmt(t.avgFps, 0)}</td><td>${t.sdFps === null ? '--' : fmt(t.sdFps, 1)}</td><td>${t.esFps === null ? '--' : fmt(t.esFps, 0)}</td>` +
+    `<td class="up">${t.groupMoa === null ? '--' : fmt(t.groupMoa, 2)}</td></tr>`).join('');
 }
 
 // ---- BLE ------------------------------------------------------------------------
@@ -793,6 +1121,7 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').ca
   setTab(tab);
   $('tabSimple').onclick = () => setTab('simple');
   $('tabAdv').onclick = () => setTab('adv');
+  $('tabLoad').onclick = () => setTab('load');
   const ap = activeProfile();
   if (ap) $('profileName').value = ap.name;
 
@@ -817,7 +1146,8 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').ca
 
   // Profiles
   $('profileSel').addEventListener('change', async () => {
-    if (!selectProfile($('profileSel').value)) { $('profileName').value = ''; return; }
+    const ok = selectProfile($('profileSel').value); renderLog(); renderLoadTests();
+    if (!ok) { $('profileName').value = ''; return; }
     if (isConnected()) { if (await sendConfig()) { await sendRequest(); await requestCard(); } }
   });
   $('btnProfSave').onclick = () => {
@@ -849,9 +1179,48 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').ca
       { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 });
   };
   ['cardStart','cardStep','cardCount'].forEach(f => $(f).addEventListener('input', () => { save(); queueCard(); }));
-  $('angUnit').addEventListener('input', () => { save(); renderSolution(lastSol); renderCard(); });
+  $('angUnit').addEventListener('input', () => { save(); renderSolution(lastSol); renderCard(); renderLog(); });
   ['tgtDir','tgtSpeed','tgtDelay'].forEach(f => $(f).addEventListener('input', () => { save(); refreshLabels(); }));
   ['hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange'].forEach(f => $(f).addEventListener('input', () => { save(); renderHit(lastSol); }));
+
+  // Shot log
+  loadShots(); renderLog();
+  $('btnLogFill').onclick = () => fillLogFromSolution();
+  $('btnLog').onclick = () => logShot();
+  $('logBody').addEventListener('click', (ev) => { const b = ev.target && ev.target.closest && ev.target.closest('button.use'); if (b) toggleShot(b.getAttribute('data-id')); });
+  $('btnLogCsv').onclick = () => exportCsv();
+  $('btnLogUndo').onclick = () => { const l = profileShots(); if (!l.length) return; shots.splice(shots.indexOf(l[l.length - 1]), 1); persistShots(); renderLog(); setNote('logNoteOut', 'Removed the last shot.', ''); };
+  $('btnLogClear').onclick = () => {
+    if (!logClearArm) { logClearArm = true; $('btnLogClear').textContent = 'Tap again'; setTimeout(() => { logClearArm = false; $('btnLogClear').textContent = 'Clear log'; }, 3000); return; }
+    logClearArm = false; $('btnLogClear').textContent = 'Clear log';
+    shots = shots.filter(s => s.profile !== profileLabel()); persistShots(); renderLog(); setNote('logNoteOut', 'Cleared this profile\'s shots.', '');
+  };
+  $('btnTrue').onclick = () => { setNote('trueNote', 'Working...', ''); setTimeout(trueLoad, 30); };
+  $('btnTrueApply').onclick = () => applyTrued();
+  $('chronoIn').addEventListener('input', renderChrono);
+
+  // Group from a photo: the two buttons open the camera or the gallery through hidden file inputs.
+  $('btnGrpCam').onclick = () => $('grpCam').click && $('grpCam').click();
+  $('btnGrpPick').onclick = () => $('grpPick').click && $('grpPick').click();
+  ['grpCam', 'grpPick'].forEach(id => $(id).addEventListener('change', (ev) => { const f = ev.target && ev.target.files && ev.target.files[0]; grpLoadFile(f); if (ev.target) ev.target.value = ''; }));
+  $('grpModeHoles').onclick = () => setGrpMode('holes');
+  $('grpModeScale').onclick = () => setGrpMode('scale');
+  $('grpModeAim').onclick = () => setGrpMode('aim');
+  $('grpCanvas').addEventListener('click', (ev) => {
+    const cv = $('grpCanvas'), b = cv.getBoundingClientRect();
+    grpTap({ x: (ev.clientX - b.left) * cv.width / b.width, y: (ev.clientY - b.top) * cv.height / b.height });
+  });
+  $('btnGrpFind').onclick = () => grpFind();
+  $('btnGrpUndo').onclick = () => grpUndo();
+  $('btnGrpClear').onclick = () => { grp.pts = []; grp.aim = null; grp.last = null; renderGroup(); };
+  $('btnGrpUse').onclick = () => grpUseInHit();
+  ['grpDist', 'grpScaleIn'].forEach(f => $(f).addEventListener('input', () => { save(); renderGroup(); }));
+  ['ldPowder', 'ldCharge', 'ldNotes'].forEach(f => $(f).addEventListener('input', () => save()));
+  loadLoadTests(); renderLoadTests(); renderGroup();
+  $('btnTestSave').onclick = () => saveLoadTest();
+  $('btnTestUndo').onclick = () => { const l = loadTests.filter(t => t.profile === profileLabel()); if (!l.length) return; loadTests.splice(loadTests.indexOf(l[l.length - 1]), 1); try { localStorage.setItem(TKEY, JSON.stringify(loadTests)); } catch (e) {} renderLoadTests(); };
+  $('btnChronoMv').onclick = () => { const st = renderChrono(); if (!st) return; $('mv').value = Math.round(st.mean); $('mv')._fire ? $('mv')._fire('input') : $('mv').dispatchEvent(new Event('input')); setNote('chronoOut', 'Muzzle velocity set to ' + Math.round(st.mean) + ' fps. Tap Send to device under Rifle and load.', ''); };
+  $('btnChronoSd').onclick = () => { const st = renderChrono(); if (!st) return; $('hitSd').value = +st.sd.toFixed(1); save(); renderHit(lastSol); setNote('chronoOut', 'Hit chance now uses SD ' + st.sd.toFixed(1) + ' fps.', ''); };
   $('units').addEventListener('change', () => { convertFormUnits(); save(); refreshLabels(); });
 
   // Keep the card fresh as conditions drift (only when a card is on screen and we are connected).
@@ -865,7 +1234,7 @@ function convertFormUnits() {
   const conv = (id, key, d) => { if (String($(id).value).trim() === '') return; const si = from[key][1](+$(id).value); $(id).value = +to[key][2](si).toFixed(d); };
   // Rifle and load fields stay imperial and temperature stays °F, so only these change.
   conv('range','range',0); conv('windManual','wind',1); conv('tgtSpeed','wind',1);
-  conv('hitW','tsize',1); conv('hitH','tsize',1); conv('hitWind','wind',1); conv('hitRange','range',0);
+  conv('grpDist','range',0); conv('hitW','tsize',1); conv('hitH','tsize',1); conv('hitWind','wind',1); conv('hitRange','range',0);
   conv('zero','range',0); conv('cardStart','range',0); conv('cardStep','range',0);
   prevUnits = $('units').value;
 }
