@@ -34,8 +34,8 @@
   .batt.low .battBar i { background:var(--warn); } .batt.crit .battBar i { background:var(--bad); }
   .batt.low, .batt.crit { color:var(--fg); }
   .status::before { content:'\25CF  '; }
-  .tabs { display:grid; grid-template-columns:1fr 1fr 1.6fr; gap:3px; background:#0d100c; border:1px solid var(--line); border-radius:10px; padding:3px; margin-bottom:12px; }
-  .tabs button { background:transparent; color:var(--dim); border:0; padding:8px; }
+  .tabs { display:grid; grid-template-columns:1fr 1.25fr 1.9fr 0.95fr; gap:3px; background:#0d100c; border:1px solid var(--line); border-radius:10px; padding:3px; margin-bottom:12px; }
+  .tabs button { background:transparent; color:var(--dim); border:0; padding:8px 2px; font-size:14px; white-space:nowrap; }
   .tabs button.on { background:var(--acc); color:#10130f; }
   #app { display:flex; flex-direction:column; }
   #app.simple .adv-only { display:none; }
@@ -43,6 +43,21 @@
   #app:not(.load) .load-only { display:none; }
   #app.load > section:not(.load-tab) { display:none; }
   #app.load #secProf { order:-1; }
+  #app:not(.stage) .stage-only { display:none; }
+  #app.stage > section:not(.stage-tab) { display:none; }
+  #app.stage #secProf { order:-2; }
+  #app.stage #secStage { order:-1; }
+  .tgt { background:#0d100c; border:1px solid var(--line); border-radius:10px; padding:8px 10px; margin-top:8px; }
+  .tgt.low { border-color:var(--warn); }
+  .tgt .t1 { font-size:13px; color:var(--dim); display:flex; justify-content:space-between; gap:6px; }
+  .tgt .t1 b { color:var(--fg); }
+  .tgt .t2 { display:flex; gap:14px; align-items:baseline; font-variant-numeric:tabular-nums; margin:2px 0; flex-wrap:wrap; }
+  .tgt .t2 .h { font-size:24px; font-weight:700; }
+  .tgt .t2 .p { margin-left:auto; font-size:18px; font-weight:600; }
+  .tgt.low .t2 .p { color:var(--warn); }
+  .tgt .t3 { display:flex; gap:6px; align-items:center; font-size:12px; color:var(--dim); margin-top:6px; }
+  .tgt .t3 button { width:auto; padding:4px 10px; font-size:13px; }
+  .tgt .t3 .res { margin-left:auto; }
   .compass { display:block; width:230px; max-width:100%; margin:6px auto 0; touch-action:none; cursor:pointer; user-select:none; -webkit-user-select:none; }
   .compass text { font-size:11px; fill:var(--dim); text-anchor:middle; dominant-baseline:middle; }
   .windread { display:grid; grid-template-columns:56px 1fr 56px; gap:8px; align-items:center; text-align:center; margin-top:4px; }
@@ -86,6 +101,7 @@
   <button id="tabSimple" class="on">Simple</button>
   <button id="tabAdv">Advanced</button>
   <button id="tabLoad">Load development</button>
+  <button id="tabStage">Stage</button>
 </div>
 
 <main id="app" class="simple">
@@ -333,7 +349,49 @@
   <div id="earthNote" class="note">Spin drift and aerodynamic jump need the bullet details under Rifle and load. Coriolis is only applied to shots beyond 1000 yd (914 m).</div>
 </section>
 
-<section id="secLive">
+<section id="secStage" class="stage-only stage-tab">
+  <h2>Stage planner</h2>
+  <div class="row">
+    <div><label>Stage</label><select id="stgSel"></select></div>
+    <div><label>Name</label><input id="stgName" type="text" maxlength="40" placeholder="e.g. Barricade 3"></div>
+  </div>
+  <div class="row3 gap">
+    <button id="btnStgNew" class="ghost">New</button>
+    <button id="btnStgSave">Save</button>
+    <button id="btnStgDel" class="danger">Delete</button>
+  </div>
+  <h2 class="gap" style="margin-top:14px">Add a target</h2>
+  <div class="row">
+    <div><label>Target name</label><input id="tgName" type="text" maxlength="30" placeholder="e.g. T3"></div>
+    <div><label id="lTgRange">Range</label><input id="tgRange" type="number" inputmode="decimal" placeholder="e.g. 640"></div>
+  </div>
+  <div class="row gap">
+    <div><label>Shape</label><select id="tgShape"><option value="circle">Round plate</option><option value="rect">Rectangle</option></select></div>
+    <div><label id="lTgW">Diameter</label><input id="tgW" type="number" inputmode="decimal" value="10"></div>
+  </div>
+  <div class="row gap">
+    <div id="tgHBox" class="hide"><label id="lTgH">Height</label><input id="tgH" type="number" inputmode="decimal" value="10"></div>
+    <div><label>Shots on it</label><input id="tgShots" type="number" inputmode="numeric" value="2"></div>
+  </div>
+  <div class="gap"><button id="btnTgAdd">Add target</button></div>
+  <div id="tgNote" class="note"></div>
+
+  <h2 class="gap" style="margin-top:14px">Run</h2>
+  <div class="row">
+    <div><label>Order</label><select id="stgOrder"><option value="entered">As entered</option><option value="near">Near to far</option><option value="far">Far to near</option><option value="odds">Best odds first</option></select></div>
+    <div><label>Flag hit chance below (%)</label><input id="stgLow" type="number" inputmode="numeric" value="50"></div>
+  </div>
+  <div id="stgCond" class="note"></div>
+  <div id="stgList"></div>
+  <div id="stgSum" class="note"></div>
+  <div class="row gap">
+    <button id="btnStgRefresh" class="ghost">Recalculate</button>
+    <button id="btnStgReset" class="ghost">Clear results</button>
+  </div>
+  <div class="note">Holds are worked out on the phone with the profile above, Solstice's live conditions (or the zero conditions when not connected), and the wind from the Shot section. Hit chance uses the settings in Advanced > Hit chance. Tap Hit or Miss after each shot to compare the stage with the plan.</div>
+</section>
+
+<section id="secLive" class="stage-tab">
   <h2>Live conditions</h2>
   <div class="env">
     <div><b id="eTemp">--</b>temp</div><div><b id="eRh">--</b>humidity</div><div><b id="ePress">--</b>pressure</div>
@@ -342,7 +400,7 @@
   </div>
 </section>
 
-<section id="secProf" class="load-tab">
+<section id="secProf" class="load-tab stage-tab">
   <h2>Saved profiles</h2>
   <label>Profile</label>
   <select id="profileSel"></select>
@@ -399,6 +457,7 @@
 <script src="solver.js"></script>
 <script src="shotlog.js"></script>
 <script src="groupcalc.js"></script>
+<script src="stage.js"></script>
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);
@@ -433,7 +492,7 @@ const isConnected = () => !!(device && device.gatt && device.gatt.connected && c
 const FIELDS = ['model','bc','mv','sight','zero','zt','zp','zh','range','windDir','windSrc','windManual','slopeSrc','slopeManual',
                 'angUnit','units','cardStart','cardStep','cardCount',
                 'bmass','bdia','blen','btw','btdir','spinOn','aeroOn','corOn','lat','azSrc','azManual','tgtDir','tgtSpeed','tgtDelay',
-                'hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange','ldPowder','ldCharge','ldNotes','grpDist','grpScaleIn','trueMvSrc'];
+                'hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange','ldPowder','ldCharge','ldNotes','grpDist','grpScaleIn','trueMvSrc','stgOrder','stgLow','tgShape','tgW','tgH','tgShots'];
 // This handheld has no tilt/compass sensor (the BNO085 comes with the rifle unit in version 2),
 // so slope and shooting direction are always typed in. This also fixes older saved settings.
 const HAS_ORIENTATION_SENSOR = false;
@@ -484,10 +543,13 @@ function setWindDir(d) { $('windDir').value = String(norm360(d)); renderWindDir(
 // ---- Simple / Advanced tabs ---------------------------------------------------------
 // Load development is its own tab: saved profile picker plus the shot log, truing and chronograph.
 function setTab(t) {
-  if (t !== 'adv' && t !== 'load') t = 'simple';
+  if (t !== 'adv' && t !== 'load' && t !== 'stage') t = 'simple';
   const simple = t === 'simple', load = t === 'load';
   $('app').classList.toggle('simple', simple);
   $('app').classList.toggle('load', load);
+  $('app').classList.toggle('stage', t === 'stage');
+  $('tabStage').classList.toggle('on', t === 'stage');
+  if (t === 'stage' && typeof renderStage === 'function') renderStage();
   $('tabSimple').classList.toggle('on', simple);
   $('tabAdv').classList.toggle('on', t === 'adv');
   $('tabLoad').classList.toggle('on', load);
@@ -794,7 +856,7 @@ function refreshLabels() {
   $('manualWindBox').classList.toggle('hide', $('windSrc').value !== 'manual');
   $('manualSlopeBox').classList.toggle('hide', $('slopeSrc').value === 'imu');
   refreshSlopeNote();
-  renderEnv(); renderSolution(lastSol); renderCard(); renderProfiles(); if (typeof renderLog === 'function' && $('logBody')) { renderLog(); renderLoadTests(); }
+  renderEnv(); renderSolution(lastSol); renderCard(); renderProfiles(); if (typeof renderLog === 'function' && $('logBody')) { renderLog(); renderLoadTests(); if ($('app').classList.contains('stage')) renderStage(); }
 }
 
 function updateEarthNote() {
@@ -1043,6 +1105,110 @@ function renderLoadTests() {
     `<td class="up">${t.groupMoa === null ? '--' : fmt(t.groupMoa, 2)}</td></tr>`).join('');
 }
 
+// ---- stage planner (logic in stage.js; solved on the phone) -------------------------------------
+const SKEY = 'bc.stages.v1';
+let stages = { active: null, list: [] }, stage = { id: null, name: '', targets: [] }, stgDelArm = false;
+function loadStages() {
+  try { const o = JSON.parse(localStorage.getItem(SKEY) || 'null'); if (o && Array.isArray(o.list)) stages = o; } catch (e) {}
+  const a = stages.list.find(x => x.id === stages.active);
+  stage = a ? JSON.parse(JSON.stringify(a)) : (stages.draft && Array.isArray(stages.draft.targets) ? stages.draft : { id: null, name: '', targets: [] });
+}
+function persistStages() { try { localStorage.setItem(SKEY, JSON.stringify(stages)); } catch (e) {} }
+// Keep the working stage in the saved list as you go once it has been saved by name.
+function autosaveStage() { if (!stage.id) { stages.draft = JSON.parse(JSON.stringify(stage)); persistStages(); return; } const i = stages.list.findIndex(x => x.id === stage.id); if (i >= 0) { stages.list[i] = JSON.parse(JSON.stringify(stage)); persistStages(); } }
+function stageConditions() {
+  const r = readRequest(), live = lastEnv && lastEnv.bmeOk && isConnected();
+  const c = readConfig(), atm = live ? { tempC: lastEnv.tempC, pressureHpa: lastEnv.pressureHpa, rhPct: lastEnv.rhPct } : { tempC: c.zeroTempC, pressureHpa: c.zeroPressureHpa, rhPct: c.zeroRhPct };
+  const wind = r.sensorWind ? (lastEnv && isConnected() ? lastEnv.windMps : 0) : r.windSpeedMps;
+  return { live, atm, shot: { windSpeedMps: wind, windClockDeg: r.windClockDeg, slopeDeg: r.slopeDeg, spinDrift: r.spinDrift, aeroJump: r.aeroJump, coriolis: r.coriolis, latitudeDeg: r.latitudeDeg, azimuthDeg: r.azimuthDeg } };
+}
+function stageHit() {
+  const h = hitInputs(null);
+  return [h.groupMoa, h.mvSdMps, h.windErrMps, h.rangeErrM].every(v => Number.isFinite(v) && v >= 0) ? { groupMoa: h.groupMoa, groupShots: h.groupShots, mvSdMps: h.mvSdMps, windErrMps: h.windErrMps, rangeErrM: h.rangeErrM } : null;
+}
+let lastPlan = null;
+function renderStage() {
+  const u = unit(), a = angle();
+  $('lTgRange').textContent = 'Range (' + u.range[0] + ')';
+  $('lTgW').textContent = ($('tgShape').value === 'circle' ? 'Diameter (' : 'Width (') + u.tsize[0] + ')';
+  $('lTgH').textContent = 'Height (' + u.tsize[0] + ')';
+  $('tgHBox').classList.toggle('hide', $('tgShape').value === 'circle');
+  $('stgSel').innerHTML = '<option value="">(new, not saved)</option>' + stages.list.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+  $('stgSel').value = stage.id || '';
+  if (document.activeElement !== $('stgName')) $('stgName').value = stage.name || '';
+  const cfg = readConfig(), err = validateConfig(cfg);
+  if (err) { setNote('stgCond', err + ' (Rifle and load, Advanced tab)', 'bad'); $('stgList').innerHTML = ''; return null; }
+  const cond = stageConditions();
+  setNote('stgCond', (cond.live ? 'Live conditions from Solstice' : 'Not connected: using the zero conditions') + '. Wind ' + fmt(u.wind[2](cond.shot.windSpeedMps), 1) + ' ' + u.wind[0] +
+    ' from ' + cond.shot.windClockDeg + '° (' + windDesc(cond.shot.windClockDeg) + ').', cond.live ? '' : 'warn');
+  const lowPct = fieldNum('stgLow');
+  const P = Stage.plan(stage.targets, { cfg, atm: cond.atm, shot: cond.shot, hit: stageHit(), order: $('stgOrder').value, lowPct: Number.isFinite(lowPct) ? lowPct : 0 });
+  lastPlan = P;
+  const ang = (m, pos, neg, sp) => (m >= 0 ? pos : neg) + (sp === false ? '' : ' ') + fmt(Math.abs(m * a.k), 2);
+  const size = (t) => t.shape === 'circle' ? fmt(u.tsize[2](t.widthM), 1) + ' ' + u.tsize[0] + ' round' : fmt(u.tsize[2](t.widthM), 1) + 'x' + fmt(u.tsize[2](t.heightM), 1) + ' ' + u.tsize[0];
+  const manual = $('stgOrder').value === 'entered';
+  $('stgList').innerHTML = P.rows.length ? P.rows.map(r => {
+    const t = r.target, h = t.results.filter(x => x === 'H').length, s = r.sol;
+    const dial = r.dialUpMrad === null ? 'first target' : 'dial ' + ang(r.dialUpMrad, '+', '-', false) + ' from the last';
+    return `<div class="tgt${r.low ? ' low' : ''}"><div class="t1"><span><b>${r.step}. ${esc(t.name || 'Target')}</b> &middot; ${fmt(u.range[2](t.rangeM), 0)} ${u.range[0]} &middot; ${size(t)} &middot; ${t.shots} shot${t.shots > 1 ? 's' : ''}</span></div>` +
+      (s.ok ? `<div class="t2"><span class="h">UP ${fmt(s.elevationMrad * a.k, 2)}</span><span class="h">${ang(s.windageMrad, 'R', 'L')}</span>` +
+        `<span class="p">${r.p === null ? '--' : Math.round(r.p * 100) + '%'}${r.low ? ' low' : ''}</span></div><div class="t1"><span>${a.name} &middot; ${fmt(s.tofS, 2)} s &middot; ${dial}</span></div>` : `<div class="t2">no solution</div>`) +
+      `<div class="t3"><button class="ghost" data-act="H" data-id="${esc(t.id)}">Hit</button><button class="ghost" data-act="M" data-id="${esc(t.id)}">Miss</button>` +
+      (manual ? `<button class="ghost" data-act="up" data-id="${esc(t.id)}">&uarr;</button><button class="ghost" data-act="down" data-id="${esc(t.id)}">&darr;</button>` : '') +
+      `<button class="ghost" data-act="del" data-id="${esc(t.id)}">&times;</button><span class="res">${t.results.length ? h + '/' + t.results.length + ' hits (' + t.results.join('') + ')' : ''}</span></div></div>`;
+  }).join('') : '<div class="note">No targets yet. Add them above.</div>';
+  const T = P.totals, c = Stage.compare(P), lows = P.rows.filter(r => r.low).length;
+  let sum = P.rows.length ? T.shots + ' shots planned, about ' + fmt(T.expectedHits, 1) + ' hits expected.' + (lows ? ' ' + lows + ' low-odds target(s) flagged: consider a steadier position, a better wind call, or skipping them.' : '') : '';
+  if (c.fired) sum += ' So far: ' + c.hits + ' hit' + (c.hits === 1 ? '' : 's') + ' from ' + c.fired + ' shot' + (c.fired === 1 ? '' : 's') + ' (plan expected ' + fmt(c.expected, 1) + ').' + (c.notes.length ? ' ' + c.notes.join(' ') : '');
+  setNote('stgSum', sum, lows || c.notes.length ? 'warn' : '');
+  return P;
+}
+function addTarget() {
+  const u = unit();
+  const t = Stage.makeTarget({ name: $('tgName').value, rangeM: u.range[1](fieldNum('tgRange')), shape: $('tgShape').value,
+    widthM: u.tsize[1](fieldNum('tgW')), heightM: u.tsize[1](fieldNum('tgH')), shots: fieldNum('tgShots') });
+  const err = Stage.validateTarget(t);
+  if (err) { setNote('tgNote', err, 'bad'); return null; }
+  stage.targets.push(t); autosaveStage();
+  $('tgName').value = ''; $('tgRange').value = '';
+  setNote('tgNote', 'Added ' + (t.name || 'target') + '.', '');
+  renderStage();
+  return t;
+}
+function stageAction(act, id) {
+  const i = stage.targets.findIndex(x => x.id === id);
+  if (i < 0) return;
+  const t = stage.targets[i];
+  if (act === 'H' || act === 'M') t.results.push(act);
+  else if (act === 'del') stage.targets.splice(i, 1);
+  else if (act === 'up' && i > 0) stage.targets.splice(i - 1, 2, stage.targets[i], stage.targets[i - 1]);
+  else if (act === 'down' && i < stage.targets.length - 1) stage.targets.splice(i, 2, stage.targets[i + 1], stage.targets[i]);
+  autosaveStage(); renderStage();
+}
+function saveStage(name) {
+  name = String(name || '').trim();
+  if (!name) { setNote('tgNote', 'Type a stage name first.', 'bad'); return false; }
+  let x = stages.list.find(s => s.name.toLowerCase() === name.toLowerCase());
+  if (!x) { x = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6) }; stages.list.push(x); }
+  stage.id = x.id; stage.name = name;
+  Object.assign(x, JSON.parse(JSON.stringify(stage)));
+  stages.list.sort((a, b) => a.name.localeCompare(b.name)); stages.active = x.id; stages.draft = null; persistStages();
+  setNote('tgNote', 'Saved stage "' + name + '".', ''); renderStage();
+  return true;
+}
+function selectStage(id) {
+  stages.active = id || null; persistStages();
+  const x = stages.list.find(s => s.id === id);
+  stage = x ? JSON.parse(JSON.stringify(x)) : { id: null, name: '', targets: [] };
+  renderStage();
+}
+function deleteStage() {
+  if (!stage.id) { setNote('tgNote', 'Pick a saved stage to delete.', 'warn'); return false; }
+  stages.list = stages.list.filter(s => s.id !== stage.id); stages.active = null; persistStages();
+  stage = { id: null, name: '', targets: [] }; renderStage(); setNote('tgNote', 'Stage deleted.', '');
+  return true;
+}
+
 // ---- BLE ------------------------------------------------------------------------
 async function writeChar(ch, bytes) { await ch.writeValueWithResponse(bytes); }
 
@@ -1149,6 +1315,7 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').ca
   $('tabSimple').onclick = () => setTab('simple');
   $('tabAdv').onclick = () => setTab('adv');
   $('tabLoad').onclick = () => setTab('load');
+  $('tabStage').onclick = () => setTab('stage');
   const ap = activeProfile();
   if (ap) $('profileName').value = ap.name;
 
@@ -1262,6 +1429,24 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').ca
   $('btnGrpClear').onclick = () => { grp.pts = []; grp.aim = null; grp.last = null; renderGroup(); };
   $('btnGrpUse').onclick = () => grpUseInHit();
   $('btnGrpRemove').onclick = () => grpRemovePhoto();
+
+  // Stage planner
+  loadStages();
+  $('btnTgAdd').onclick = () => addTarget();
+  $('stgList').addEventListener('click', (ev) => { const b = ev.target && ev.target.closest && ev.target.closest('button[data-act]'); if (b) stageAction(b.getAttribute('data-act'), b.getAttribute('data-id')); });
+  $('stgSel').addEventListener('change', () => selectStage($('stgSel').value));
+  $('btnStgNew').onclick = () => { stages.active = null; persistStages(); stage = { id: null, name: '', targets: [] }; $('stgName').value = ''; renderStage(); };
+  $('btnStgSave').onclick = () => saveStage($('stgName').value);
+  $('btnStgDel').onclick = () => {
+    if (!stgDelArm) { stgDelArm = true; $('btnStgDel').textContent = 'Tap again'; setTimeout(() => { stgDelArm = false; $('btnStgDel').textContent = 'Delete'; }, 3000); return; }
+    stgDelArm = false; $('btnStgDel').textContent = 'Delete'; deleteStage();
+  };
+  $('btnStgRefresh').onclick = () => renderStage();
+  $('btnStgReset').onclick = () => { stage.targets.forEach(t => { t.results = []; }); autosaveStage(); renderStage(); };
+  ['stgOrder', 'stgLow', 'tgShape'].forEach(f => $(f).addEventListener('input', () => { save(); renderStage(); }));
+  ['tgW', 'tgH', 'tgShots'].forEach(f => $(f).addEventListener('input', () => save()));
+  // Conditions drift: refresh the plan every 15 s while the Stage tab is open.
+  setInterval(() => { if ($('app').classList.contains('stage')) renderStage(); }, 15000);
   ['grpDist', 'grpScaleIn'].forEach(f => $(f).addEventListener('input', () => { save(); renderGroup(); }));
   ['ldPowder', 'ldCharge', 'ldNotes'].forEach(f => $(f).addEventListener('input', () => save()));
   loadLoadTests(); renderLoadTests(); renderGroup();
@@ -1282,7 +1467,7 @@ function convertFormUnits() {
   const conv = (id, key, d) => { if (String($(id).value).trim() === '') return; const si = from[key][1](+$(id).value); $(id).value = +to[key][2](si).toFixed(d); };
   // Rifle and load fields stay imperial and temperature stays °F, so only these change.
   conv('range','range',0); conv('windManual','wind',1); conv('tgtSpeed','wind',1);
-  conv('grpDist','range',0); conv('hitW','tsize',1); conv('hitH','tsize',1); conv('hitWind','wind',1); conv('hitRange','range',0);
+  conv('grpDist','range',0); conv('tgRange','range',0); conv('tgW','tsize',1); conv('tgH','tsize',1); conv('hitW','tsize',1); conv('hitH','tsize',1); conv('hitWind','wind',1); conv('hitRange','range',0);
   conv('zero','range',0); conv('cardStart','range',0); conv('cardStep','range',0);
   prevUnits = $('units').value;
 }

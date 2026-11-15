@@ -1,7 +1,7 @@
 // Offline cache so the app opens with no signal after the first visit.
 // Bump CACHE when you change any file, or phones will keep serving the old copy.
-const CACHE = 'ballistics-v17';
-const FILES = ['./', './index.html', './protocol.js', './hitprob.js', './solver.js', './shotlog.js', './groupcalc.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const CACHE = 'ballistics-v18';
+const FILES = ['./', './index.html', './protocol.js', './hitprob.js', './solver.js', './shotlog.js', './groupcalc.js', './stage.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
   // cache: 'reload' skips the browser's own HTTP cache. GitHub Pages sends max-age=600, so without it a
