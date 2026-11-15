@@ -204,7 +204,10 @@ int main() {
     check(g_sol_connects >= 2, "Meridian looks for Solstice again", g_sol_connects, 2);
 
     // Laser silent -> fault shown.
-    command({meridian::kCmdRange}); spin(1700);
+    check(g_pin_level[LASER_EN_PIN] == LOW, "laser switched off after a minute idle");
+    command({meridian::kCmdRange}); spin(100);
+    check(g_pin_level[LASER_EN_PIN] == HIGH, "range command powers the laser back up");
+    spin(2000);
     check(laserFault() && screenLine(136) == "LASER FAULT", "laser that doesn't answer shows LASER FAULT");
 
     // Second central keeps advertising going.

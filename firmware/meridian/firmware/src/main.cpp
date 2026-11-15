@@ -52,8 +52,9 @@
 #define BNO_ADDR 0x4A                   // Adafruit BNO085 default
 
 // Laser (ERDI LRF0306C): 3.3 V serial on the Feather's RX/TX pins (Serial1). POWER_ON driven by LASER_EN.
-#define LASER_BAUD 115200               // LRF0310C factory default; CONFIRM for the LRF0306C
-#define LASER_EN_PIN 6                  // D6 -> module POWER_ON (HIGH = on). Tie POWER_ON high and set -1 if unused.
+#define LASER_BAUD 115200               // LRF0306C factory default
+#define LASER_EN_PIN 6                  // D6 -> module pin 1 POWER_ON (HIGH = on). If POWER_ON is tied high, set -1
+                                        // (the laser then draws up to 0.8 W in standby instead of 10 mW).
 #ifndef RX
 #define RX 38
 #define TX 39
@@ -88,7 +89,8 @@ static Adafruit_ST7789 tft(TFT_CS, TFT_DC, TFT_RST);
 static Adafruit_MAX17048 maxGauge;
 static Adafruit_LC709203F lcGauge;      // older Feather ESP32-S3 boards have this gauge instead
 static Preferences prefs;
-static lrf::ErdiRangeFinder<HardwareSerial> laser(Serial1);
+static void laserPower(bool on) { digitalWrite(LASER_EN_PIN, on ? HIGH : LOW); }
+static lrf::ErdiRangeFinder<HardwareSerial> laser(Serial1, LASER_EN_PIN >= 0 ? laserPower : nullptr);
 static nmea::Parser nmeaParser;
 
 static bool bmeOk = false, imuOk = false, gpsOk = false, maxOk = false, lcOk = false;
@@ -212,7 +214,7 @@ static void saveSettings() {
 // ---- Sleep ---------------------------------------------------------------------------------------------
 #if __has_include(<esp_sleep.h>)
 static void deepSleepNow() {
-    if (LASER_EN_PIN >= 0) digitalWrite(LASER_EN_PIN, LOW);
+    laser.off();
     digitalWrite(TFT_BL, LOW);
     tft.enableSleep(true);
     digitalWrite(I2C_POWER, LOW);                          // BME280, BNO085, GPS off
@@ -940,7 +942,7 @@ void setup() {
     delay(300);
     pinMode(I2C_POWER, OUTPUT);
     digitalWrite(I2C_POWER, HIGH);                // STEMMA QT power: BME280, BNO085, GPS
-    if (LASER_EN_PIN >= 0) { pinMode(LASER_EN_PIN, OUTPUT); digitalWrite(LASER_EN_PIN, HIGH); }
+    if (LASER_EN_PIN >= 0) { pinMode(LASER_EN_PIN, OUTPUT); digitalWrite(LASER_EN_PIN, LOW); }   // the driver powers it
     pinMode(TFT_BL, OUTPUT);
     digitalWrite(TFT_BL, HIGH);
     pinMode(BTN_RANGE, INPUT_PULLUP);
@@ -971,8 +973,8 @@ void setup() {
     }
 
     Serial1.begin(LASER_BAUD, SERIAL_8N1, RX, TX);
-    laser.begin(millis());
-    laser.targetMode(targetMode);
+    laser.targetMode(targetMode);                         // remembered; sent once the laser has started
+    laser.begin(millis());                                // power on, self-check, then off after a minute idle
 
     Serial.printf("BME280: %s\n", bmeOk ? "ok" : "NOT FOUND");
     Serial.printf("BNO085: %s\n", imuOk ? "ok" : "NOT FOUND");

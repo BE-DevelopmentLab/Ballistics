@@ -122,28 +122,55 @@ static void test_laser() {
         int read() { return at < rx.size() ? rx[at++] : -1; }
         size_t write(const uint8_t* d, size_t k) { tx.insert(tx.end(), d, d + k); return k; }
     } port;
-    lrf::ErdiRangeFinder<Port> drv(port);
+    static int powerLevel = -1, powerCalls = 0;
+    lrf::ErdiRangeFinder<Port> drv(port, [](bool on) { powerLevel = on; ++powerCalls; });
+    auto cmds = [&]() { std::vector<uint8_t> c; for (size_t i = 0; i + 4 < port.tx.size(); ++i) if (port.tx[i] == 0xEE && port.tx[i + 1] == 0x16) c.push_back(port.tx[i + 4]); return c; };
+    drv.targetMode(lrf::kTargetLast);
     drv.begin(0);
-    check(!drv.poll(100, r) && port.tx.empty(), "laser driver: waits for start-up before self-check");
-    drv.poll(700, r);
-    check(port.tx.size() == 6 && port.tx[4] == lrf::kCmdSelfCheck, "laser driver: sends self-check after start-up");
+    check(powerLevel == 1 && drv.powered(), "laser driver: begin() switches POWER_ON high");
+    check(!drv.poll(100, r) && port.tx.empty(), "laser driver: nothing sent during the 0.3 s start-up");
+    drv.poll(450, r);
+    auto c0 = cmds();
+    check(c0.size() == 2 && c0[0] == lrf::kCmdSelfCheck && c0[1] == lrf::kCmdTargetMode && port.tx[11] == lrf::kTargetLast,
+          "laser driver: after start-up sends self-check, then the saved target mode (last)");
     const uint8_t sc[] = {0xEE, 0x16, 0x06, 0x03, 0x01, 0xFF, 0x00, 0xF7, 0xFF, 0xF9};      // manual's example
-    port.rx.assign(sc, sc + sizeof sc);
-    drv.poll(710, r);
+    port.rx.assign(sc, sc + sizeof sc); port.at = 0;
+    drv.poll(460, r);
     check(drv.present() && drv.selfCheckOk(), "laser driver: manual's self-check reply reads as healthy");
-    port.tx.clear(); drv.single(1000);
-    check(drv.busy() && port.tx.size() == 6 && port.tx[4] == lrf::kCmdSingle, "laser driver: single shot sent, busy");
+    port.tx.clear(); drv.single(1000); drv.poll(1000, r);
+    check(drv.busy() && port.tx.size() == 6 && port.tx[4] == lrf::kCmdSingle, "laser driver: warm laser fires at once");
     port.rx.insert(port.rx.end(), reply, reply + sizeof reply);
-    const bool got = drv.poll(1200, r);
-    check(got && r.kind == lrf::Result::kRange && near(r.range_m, 612.3, 0.01) && !drv.busy(), "laser driver: reply ends the shot with 612.3 m", r.range_m, 612.3);
-    drv.single(2000);
+    const bool got = drv.poll(1050, r);
+    check(got && r.kind == lrf::Result::kRange && std::fabs(r.range_m - 612.3) < 0.01 && !drv.busy(), "laser driver: reply ends the shot with 612.3 m", r.range_m, 612.3);
+    drv.single(2000); drv.poll(2000, r);
     check(!drv.poll(3000, r), "laser driver: no timeout before 1.5 s");
     check(drv.poll(3600, r) && r.kind == lrf::Result::kTimeout && !drv.busy(), "laser driver: silent module times out");
-    port.tx.clear(); drv.continuous(true, 4000);
-    check(drv.isContinuous() && port.tx.size() == 14 && port.tx[4] == lrf::kCmdFrequency && port.tx[12] == lrf::kCmdContinuous,
+    drv.poll(3600 + 59000, r);
+    check(drv.powered(), "laser driver: still on before a minute idle");
+    drv.poll(3600 + 61000, r);
+    check(!drv.powered() && powerLevel == 0, "laser driver: switched off after a minute idle (10 mW instead of 0.8 W)");
+    port.tx.clear(); drv.single(70000); drv.poll(70000, r);
+    check(drv.powered() && port.tx.empty(), "laser driver: cold shot powers up and waits");
+    drv.poll(70400, r);
+    auto c1 = cmds();
+    check(c1.size() == 2 && c1[0] == lrf::kCmdTargetMode && c1[1] == lrf::kCmdSingle, "laser driver: then re-sends target mode and fires");
+    check(!drv.poll(71800, r), "laser driver: reply timeout counts from when the shot went out");
+    drv.poll(72000, r);
+    port.tx.clear(); drv.continuous(true, 73000); drv.poll(73000, r);
+    auto c2 = cmds();
+    check(drv.isContinuous() && c2.size() == 2 && c2[0] == lrf::kCmdFrequency && c2[1] == lrf::kCmdContinuous,
           "laser driver: continuous sends 1 Hz then start");
-    port.tx.clear(); drv.continuous(false, 5000);
+    drv.poll(73000 + 120000, r);
+    check(drv.powered(), "laser driver: stays on while in continuous mode");
+    port.tx.clear(); drv.continuous(false, 200000);
+    drv.poll(200000, r);
     check(!drv.isContinuous() && port.tx.size() == 6 && port.tx[4] == lrf::kCmdStop, "laser driver: continuous off sends stop");
+    const uint8_t err[] = {0xEE, 0x16, 0x06, 0x03, 0x06, 0x00, 0x00, 0x00, 0x00, 0x09};
+    port.rx.insert(port.rx.end(), err, err + sizeof err);
+    check(drv.poll(200010, r) && r.kind == lrf::Result::kFault, "laser driver: unsolicited ranging-error frame (0x06) is a fault");
+    const uint8_t sc2[] = {0xEE, 0x16, 0x06, 0x03, 0x01, 0x00, 0x00, 0xF7, 0x00, 0xFB};   // 5V6 power bit clear
+    port.rx.insert(port.rx.end(), sc2, sc2 + sizeof sc2);
+    check(drv.poll(200020, r) && r.kind == lrf::Result::kFault && !drv.selfCheckOk(), "laser driver: self-check with 5V6 power abnormal is a fault");
 }
 
 // ---------------------------------------------------------------------------------------------------------
