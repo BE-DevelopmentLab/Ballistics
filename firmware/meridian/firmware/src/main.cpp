@@ -78,6 +78,10 @@
 #define SOLSTICE_SCAN_EVERY_MS 20000    // look for Solstice this often while not linked
 #define SOLSTICE_SCAN_MS 4000
 #define SOLSTICE_WIND_STALE_MS 5000     // Solstice wind older than this is not used
+#define TARGET_SAVE_WINDOW_MS 10000     // MODE within this long after a range saves it as a target (else next page)
+#define AUTO_SLEEP_DEFAULT_MIN 10       // minutes without use before Meridian sleeps (change with the autosleep command)
+#define AUTO_SLEEP_WARN_MS 30000        // screen warns this long before sleeping
+#define MOVE_ACTIVITY_DEG 2.0f          // moving the rifle this much counts as use (so it won't sleep while aiming)
 
 using namespace ballistics;
 
@@ -108,6 +112,8 @@ static bool rangeValid = false;
 static float range_m = 0;
 static uint32_t rangeAtMs = 0;
 static uint8_t rangeSeq = 0;
+static float rangePitch = 0, rangeBearing = 0;   // rifle angles at the moment of the last laser shot
+static bool rangeAngValid = false;
 static uint32_t noTargetUntil = 0, laserFaultUntil = 0;
 static float laserOffset_m = 0;
 static uint8_t targetMode = lrf::kTargetFirst;
@@ -177,6 +183,18 @@ static protocol::CardRequest cardRun;
 static bool solsticeWanted = true;
 static uint8_t lastCmdResult = 0;
 
+// Saved targets A, B, C (kept through power-off).
+static meridian::Target targets[meridian::kMaxTargets];
+static uint8_t nextTargetSlot = 0;
+static uint32_t savedFlashUntil = 0;     // screen shows "SAVED A 612 m" until then
+static uint8_t savedFlashSlot = 0;
+static uint8_t lastSavedSeq = 0;         // rangeSeq of the last range saved by the MODE button
+
+// Idle auto-sleep.
+static uint8_t autoSleepMin = AUTO_SLEEP_DEFAULT_MIN;
+static volatile uint32_t lastActivityMs = 0;
+static void noteActivity() { lastActivityMs = millis(); }
+
 // ---- Settings that survive power-off ------------------------------------------------------------------
 static void loadSettings() {
     prefs.begin("meridian", true);
@@ -192,6 +210,15 @@ static void loadSettings() {
     laserOffset_m = prefs.getFloat("loff", 0);
     targetMode = prefs.getUChar("tmode", lrf::kTargetFirst);
     solsticeWanted = prefs.getBool("sol", true);
+    autoSleepMin = prefs.getUChar("sleepmin", AUTO_SLEEP_DEFAULT_MIN);
+    nextTargetSlot = prefs.getUChar("tnext", 0) % meridian::kMaxTargets;
+    for (uint8_t i = 0; i < meridian::kMaxTargets; ++i) {
+        const char key[3] = {'t', (char)('a' + i), 0};
+        uint8_t b[meridian::kTargetSize];
+        if (prefs.getBytes(key, b, sizeof b) == sizeof b) targets[i] = meridian::decode_target(b);
+        else targets[i] = meridian::Target{};
+        targets[i].slot = i;
+    }
     prefs.end();
 }
 static void saveSettings() {
@@ -208,6 +235,18 @@ static void saveSettings() {
     prefs.putFloat("loff", laserOffset_m);
     prefs.putUChar("tmode", targetMode);
     prefs.putBool("sol", solsticeWanted);
+    prefs.putUChar("sleepmin", autoSleepMin);
+    prefs.end();
+}
+static void saveTargets() {
+    prefs.begin("meridian", false);
+    prefs.putUChar("tnext", nextTargetSlot);
+    for (uint8_t i = 0; i < meridian::kMaxTargets; ++i) {
+        const char key[3] = {'t', (char)('a' + i), 0};
+        uint8_t b[meridian::kTargetSize];
+        meridian::encode_target(targets[i], b);
+        prefs.putBytes(key, b, sizeof b);
+    }
     prefs.end();
 }
 
@@ -255,6 +294,12 @@ static void updateImu() {
         const orient::Quat q{v.un.rotationVector.real, v.un.rotationVector.i, v.un.rotationVector.j, v.un.rotationVector.k};
         ang = orient::angles(q, cal);
         angValid = true;
+        static double refP = 1e9, refC = 0, refB = 0;      // pose at the last "use"
+        if (std::fabs(ang.pitch_deg - refP) > MOVE_ACTIVITY_DEG || std::fabs(ang.cant_deg - refC) > MOVE_ACTIVITY_DEG ||
+            std::fabs(orient::wrap180(ang.bearing_deg - refB)) > MOVE_ACTIVITY_DEG) {
+            if (refP < 1e8) noteActivity();               // the first reading only sets the reference
+            refP = ang.pitch_deg; refC = ang.cant_deg; refB = ang.bearing_deg;
+        }
         magCal = v.status & 0x03;
         headingAccDeg = v.un.rotationVector.accuracy * 57.29578f;
     }
@@ -285,6 +330,8 @@ static void updateLaser() {
         case lrf::Result::kRange:
             range_m = r.range_m + laserOffset_m;
             rangeValid = true; rangeAtMs = now; ++rangeSeq;
+            rangePitch = ang.pitch_deg; rangeBearing = ang.bearing_deg; rangeAngValid = angValid;
+            noteActivity();
             noTargetUntil = laserFaultUntil = 0;
             Serial.printf("laser %.1f m (echo %u)\n", range_m, r.echo);
             notifyShot();
@@ -308,7 +355,7 @@ static bool laserFault() { return (int32_t)(laserFaultUntil - millis()) > 0 || (
 // ---- Bluetooth: server side ------------------------------------------------------------------------------
 static NimBLEServer* server = nullptr;
 static NimBLECharacteristic *chSolution = nullptr, *chEnv = nullptr;
-static NimBLECharacteristic *chShot = nullptr, *chPos = nullptr, *chStatus = nullptr;
+static NimBLECharacteristic *chShot = nullptr, *chPos = nullptr, *chStatus = nullptr, *chTarget = nullptr;
 
 class ServerCb : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* s, NimBLEConnInfo&) override {
@@ -320,6 +367,7 @@ class ServerCb : public NimBLEServerCallbacks {
 
 class ConfigCb : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* c, NimBLEConnInfo&) override {
+        noteActivity();                                  // any write from the phone or spotter counts as use
         const NimBLEAttValue v = c->getValue();
         protocol::Config n;
         const bool ok = protocol::decode_config(v.data(), v.size(), n);
@@ -331,6 +379,7 @@ class ConfigCb : public NimBLECharacteristicCallbacks {
 };
 class RequestCb : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* c, NimBLEConnInfo&) override {
+        noteActivity();                                  // any write from the phone or spotter counts as use
         const NimBLEAttValue v = c->getValue();
         protocol::Request n;
         const bool ok = protocol::decode_request(v.data(), v.size(), n);
@@ -343,6 +392,7 @@ class RequestCb : public NimBLECharacteristicCallbacks {
 };
 class CardCb : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* c, NimBLEConnInfo&) override {
+        noteActivity();                                  // any write from the phone or spotter counts as use
         const NimBLEAttValue v = c->getValue();
         protocol::CardRequest n;
         const bool ok = protocol::decode_card(v.data(), v.size(), n);
@@ -354,6 +404,7 @@ class CardCb : public NimBLECharacteristicCallbacks {
 };
 class CorrectionCb : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* c, NimBLEConnInfo&) override {
+        noteActivity();                                  // any write from the phone or spotter counts as use
         const NimBLEAttValue v = c->getValue();
         meridian::Correction n;
         if (!meridian::decode_correction(v.data(), v.size(), n)) return;
@@ -366,6 +417,7 @@ class CorrectionCb : public NimBLECharacteristicCallbacks {
 };
 class CommandCb : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* c, NimBLEConnInfo&) override {
+        noteActivity();                                  // any write from the phone or spotter counts as use
         const NimBLEAttValue v = c->getValue();
         meridian::Command n;
         const bool ok = meridian::decode_command(v.data(), v.size(), n);
@@ -377,6 +429,7 @@ class CommandCb : public NimBLECharacteristicCallbacks {
 };
 class MessageCb : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* c, NimBLEConnInfo&) override {
+        noteActivity();                                  // any write from the phone or spotter counts as use
         const NimBLEAttValue v = c->getValue();
         char tmp[meridian::kMessageMax + 1];
         if (!meridian::decode_message(v.data(), v.size(), tmp)) return;
@@ -409,6 +462,7 @@ static void setupBle() {
     mr->createCharacteristic(MR_UUID_COMMAND, NIMBLE_PROPERTY::WRITE)->setCallbacks(new CommandCb());
     mr->createCharacteristic(MR_UUID_MESSAGE, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR)->setCallbacks(new MessageCb());
     chStatus = mr->createCharacteristic(MR_UUID_STATUS, NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ);
+    chTarget = mr->createCharacteristic(MR_UUID_TARGET, NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ);
     mr->start();
 
     // Advertising packet: the Solstice service UUID (so the phone app's device chooser lists Meridian).
@@ -727,6 +781,53 @@ static void notifyEnv() {
     chEnv->notify();
 }
 
+// ---- Saved targets ---------------------------------------------------------------------------------------
+static void notifyTarget(uint8_t slot) {
+    uint8_t buf[meridian::kTargetSize];
+    meridian::encode_target(targets[slot], buf);
+    chTarget->setValue(buf, sizeof buf);
+    chTarget->notify();
+}
+
+// Is there a laser range young enough to save as a target?
+static bool rangeSaveable() { return rangeValid && millis() - rangeAtMs <= TARGET_SAVE_WINDOW_MS; }
+
+// Save the latest laser range, with the rifle's incline and bearing at that shot, as target A, B or C.
+// slot 255 = the next slot in turn (A, B, C, then A again). Returns false if there is no fresh range.
+static bool saveTarget(uint8_t slot) {
+    if (!rangeSaveable()) return false;
+    if (slot >= meridian::kMaxTargets) slot = nextTargetSlot;
+    meridian::Target& t = targets[slot];
+    const nmea::Fix& fx = nmeaParser.fix();
+    t = meridian::Target{};
+    t.slot = slot;
+    t.flags = meridian::kTargetSaved | (rangeAngValid ? meridian::kTargetImu : 0) |
+              ((cal.declination_set || cal.heading_set) ? meridian::kTargetTrueNorth : 0) | (fx.valid ? meridian::kTargetGps : 0);
+    t.range_m = range_m;
+    t.incline_deg = rangeAngValid ? rangePitch : 0;
+    t.bearing_deg = rangeAngValid ? rangeBearing : 0;
+    if (fx.valid) { t.lat_deg = fx.lat_deg; t.lon_deg = fx.lon_deg; }
+    t.utc = fx.utc ? fx.utc - (millis() - rangeAtMs) / 1000 : 0;   // roughly when the shot was taken
+    nextTargetSlot = (slot + 1) % meridian::kMaxTargets;
+    lastSavedSeq = rangeSeq;
+    saveTargets();
+    notifyTarget(slot);
+    savedFlashSlot = slot; savedFlashUntil = millis() + 3000;
+    Serial.printf("target %c saved: %.1f m, incline %+.1f, bearing %.1f\n", meridian::target_letter(slot), t.range_m,
+                  t.incline_deg, t.bearing_deg);
+    return true;
+}
+
+static void clearTargets(uint8_t slot) {
+    for (uint8_t i = 0; i < meridian::kMaxTargets; ++i) {
+        if (slot != 255 && slot != i) continue;
+        targets[i] = meridian::Target{}; targets[i].slot = i;
+        notifyTarget(i);
+    }
+    if (slot == 255) nextTargetSlot = 0;
+    saveTargets();
+}
+
 // ---- Commands (from the phone or spotter; run in loop, not in the Bluetooth task) ---------------------------
 static void startRange() {
     if (laserFault() && !laser.present()) return;
@@ -762,6 +863,10 @@ static uint8_t runCommand(const meridian::Command& c) {
         case kCmdTargetMode: targetMode = c.u; laser.targetMode(targetMode); saveSettings(); return 0;
         case kCmdSolsticeLink: solsticeWanted = c.u == 1; saveSettings(); return 0;
         case kCmdSleep: sleepAtMs = millis() + 400; sleepRequested = true; return 0;
+        case kCmdSaveTarget: return saveTarget(c.u) ? 0 : 2;
+        case kCmdClearTargets: clearTargets(c.u); return 0;
+        case kCmdSendTargets: for (uint8_t i = 0; i < kMaxTargets; ++i) notifyTarget(i); return 0;
+        case kCmdAutoSleep: autoSleepMin = c.u; saveSettings(); return 0;
         default: return 1;
     }
 }
@@ -783,8 +888,31 @@ static void serviceCommands() {
     }
 }
 
+// ---- Idle auto-sleep ------------------------------------------------------------------------------------------
+// Use = a button, a laser range, any write from the phone or spotter, or moving the rifle more than
+// MOVE_ACTIVITY_DEG. Never sleeps while charging or in continuous ranging. MODE wakes it, as after a manual sleep.
+// Returns milliseconds until sleep, or -1 if it is not counting down.
+static int32_t autoSleepRemainingMs() {
+    if (autoSleepMin == 0 || batt_charging || laser.isContinuous()) return -1;
+    const uint32_t idle = millis() - lastActivityMs;
+    const uint32_t limit = autoSleepMin * 60000u;
+    return idle >= limit ? 0 : (int32_t)(limit - idle);
+}
+
+static void serviceAutoSleep() {
+    static bool wasCounting = false;
+    const int32_t left = autoSleepRemainingMs();
+    if (left < 0) { if (wasCounting) noteActivity(); wasCounting = false; return; }   // restart the clock after charging
+    wasCounting = true;
+    if (left == 0 && !sleepRequested) {
+        Serial.printf("No use for %u min: sleeping\n", autoSleepMin);
+        sleepAtMs = millis(); sleepRequested = true;
+    }
+}
+
 // ---- Buttons ------------------------------------------------------------------------------------------------
-static uint8_t page = 0;              // 0 = corrections, 1 = sensors
+static uint8_t page = 0;              // 0 = corrections, 1 = targets, 2 = sensors
+#define PAGES 3
 static bool screenDirty = true;
 
 struct Button {
@@ -807,10 +935,14 @@ static Button btnRange{BTN_RANGE, LONG_RANGE_MS}, btnMode{BTN_MODE, LONG_MODE_MS
 static void serviceButtons() {
     const uint32_t now = millis();
     const int r = btnRange.poll(now);
+    if (r) noteActivity();
     if (r == 1) startRange();
     if (r == 2) laser.continuous(!laser.isContinuous(), now);
-    const int m = btnMode.poll(now);
-    if (m == 1) { page = (page + 1) % 2; screenDirty = true; }
+    int m = btnMode.poll(now);
+    if (m) noteActivity();
+    // MODE right after a range on the shooting page saves that range as the next target (A, B, C).
+    if (m == 1 && page == 0 && rangeSaveable() && lastSavedSeq != rangeSeq && saveTarget(255)) m = 0;
+    if (m == 1) { page = (page + 1) % PAGES; screenDirty = true; }
     if (m == 2) { sleepAtMs = now + 50; sleepRequested = true; }
 }
 
@@ -862,6 +994,20 @@ static screen::Input screenInput() {
     in.centrals = server ? server->getConnectedCount() : 0;
     in.solstice = !std::isnan(liveWind());
     in.message = msgCopy;
+    // Meridian's own notes take the message line: sleep warning, then "saved", then the save hint.
+    static char note[24];
+    const int32_t sleepIn = autoSleepRemainingMs();
+    if (sleepIn >= 0 && sleepIn <= AUTO_SLEEP_WARN_MS) {
+        std::snprintf(note, sizeof note, "SLEEP IN %lds", (long)(sleepIn + 999) / 1000);
+        in.message = note;
+    } else if ((int32_t)(savedFlashUntil - now) > 0) {
+        const meridian::Target& t = targets[savedFlashSlot];
+        std::snprintf(note, sizeof note, "SAVED %c %.0f m", meridian::target_letter(savedFlashSlot), t.range_m);
+        in.message = note;
+    } else if (!msgCopy[0] && rangeSaveable() && lastSavedSeq != rangeSeq) {
+        std::snprintf(note, sizeof note, "MODE: SAVE AS %c", meridian::target_letter(nextTargetSlot));
+        in.message = note;
+    }
     return in;
 }
 
@@ -927,12 +1073,37 @@ static void drawSensorPage() {
     }
 }
 
+static void drawTargetPage() {
+    static uint32_t last = 0;
+    const uint32_t now = millis();
+    if (!screenDirty && now - last < 1000) return;
+    last = now;
+    tft.fillScreen(0x0000);
+    tft.setTextSize(2);
+    tft.setTextColor(0x07FF); tft.setCursor(0, 0); tft.print("TARGETS");
+    for (uint8_t i = 0; i < meridian::kMaxTargets; ++i) {
+        const meridian::Target& t = targets[i];
+        char a[28], b[28];
+        if (t.flags & meridian::kTargetSaved) {
+            std::snprintf(a, sizeof a, "%c %.0f m %+.1f", meridian::target_letter(i), t.range_m, t.incline_deg);
+            std::snprintf(b, sizeof b, "  BRG %03.0f%s%s", std::fmod(std::round(t.bearing_deg), 360.0),
+                          (t.flags & meridian::kTargetTrueNorth) ? "T" : "M", (t.flags & meridian::kTargetGps) ? " GPS" : "");
+        } else {
+            std::snprintf(a, sizeof a, "%c --", meridian::target_letter(i)); b[0] = 0;
+        }
+        tft.setTextColor(0xFFFF); tft.setCursor(0, 30 + i * 56); tft.print(a);
+        tft.setTextColor(0x7BEF); tft.setCursor(0, 52 + i * 56); tft.print(b);
+    }
+    tft.setTextSize(1); tft.setTextColor(0x7BEF); tft.setCursor(0, 220);
+    tft.print("Save: RANGE, then MODE within 10 s");
+}
+
 static void drawScreen() {
     static uint8_t lastPage = 255;
     const bool force = screenDirty || page != lastPage;
     if (page != lastPage) { tft.fillScreen(0x0000); shown = screen::Model{}; }
     lastPage = page;
-    if (page == 0) drawMainPage(force); else drawSensorPage();
+    if (page == 0) drawMainPage(force); else if (page == 1) drawTargetPage(); else drawSensorPage();
     screenDirty = false;
 }
 
@@ -983,6 +1154,7 @@ void setup() {
 
     setupBle();
     Serial.println("Advertising as " BLE_NAME);
+    noteActivity();                               // the auto-sleep clock starts at power-on
     screenDirty = true;
     tft.fillScreen(0x0000);
 }
@@ -1000,6 +1172,7 @@ void loop() {
     serviceButtons();
     serviceCommands();
     serviceSolstice();
+    serviceAutoSleep();
 
     const uint32_t now = millis();
     static uint32_t lastSlowMs = 0, lastShotMs = 0, lastDrawMs = 0;

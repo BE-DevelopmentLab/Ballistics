@@ -31,6 +31,9 @@ int main(int argc, char** argv) {
         meridian::Status t; t.flags = 0x25; t.mount = 10; t.units = 1; t.pitch_zero = 0.81; t.cant_zero = -1.3; t.heading_offset = 93.5;
         t.declination = 11.5; t.laser_offset_m = 0.3; t.target_mode = 2; t.last_result = 0; t.last_corr_seq = 42; t.centrals = 2; t.laser = 1;
         meridian::encode_status(t, b); hex("status", b, 20);
+        meridian::Target g; g.slot = 1; g.flags = 0x0F; g.range_m = 845.6; g.incline_deg = 3.05; g.bearing_deg = 271.43;
+        g.lat_deg = 45.5; g.lon_deg = -111.75; g.utc = 1794772800;
+        meridian::encode_target(g, b); hex("target", b, 20);
         return 0;
     }
     if (argc >= 3 && !std::strcmp(argv[1], "correction")) {

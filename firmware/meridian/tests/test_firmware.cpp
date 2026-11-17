@@ -215,6 +215,74 @@ int main() {
     stub_connect_central();
     check(g_adv_starts == adv0 + 1, "after a connection Meridian keeps advertising for the second device");
 
+    // ---- Saved targets ----
+    stub_write(MR_UUID_MESSAGE, {});                    // spotter clears its message
+    setQuat(qaxis(1, 0, 0, 5));                          // muzzle up a bit (raw 5 deg, minus the 2 deg level zero)
+    spin(100);
+    command({meridian::kCmdRange}); spin(500);
+    laserReply(845.6f); spin(50);
+    setQuat(qaxis(1, 0, 0, 0));                          // rifle moves after the shot: the saved angles must not
+    spin(300);
+    check(screenLine(224) == "MODE: SAVE AS A", "after a range the screen offers MODE to save target A", 0, 0);
+    size_t n0 = g_notifs().size();
+    g_pin_input[BTN_MODE] = LOW; spin(100); g_pin_input[BTN_MODE] = HIGH; spin(300);
+    const Notif* tn = last(MR_UUID_TARGET);
+    meridian::Target ta = tn ? meridian::decode_target(tn->data.data()) : meridian::Target{};
+    check(tn && tn->ms >= g_notifs()[n0].ms && ta.slot == 0 && (ta.flags & meridian::kTargetSaved) && std::fabs(ta.range_m - 845.6) < 0.051,
+          "MODE after a range saves target A at 845.6 m and notifies it", ta.range_m, 845.6);
+    check(std::fabs(ta.incline_deg - 3.0) < 0.02 && (ta.flags & meridian::kTargetImu) && (ta.flags & meridian::kTargetTrueNorth),
+          "target keeps the incline at the moment of the shot (3.0), true bearing", ta.incline_deg, 3.0);
+    check(std::fabs(ta.bearing_deg - ang.bearing_deg) < 0.05 && (ta.flags & meridian::kTargetGps) && std::fabs(ta.lat_deg - 45.5) < 1e-6 && ta.utc > 0,
+          "target has the bearing, shooter GPS position and time");
+    check(page == 0 && screenLine(224) == "SAVED A 846 m", "screen says SAVED A and stays on the shooting page");
+    g_pin_input[BTN_MODE] = LOW; spin(100); g_pin_input[BTN_MODE] = HIGH; spin(300);
+    check(page == 1 && targets[1].flags == 0, "MODE again (same range) goes to the targets page, no second save");
+    check(screenLine(30).rfind("A 846 m +3.0", 0) == 0 && screenLine(86) == "B --", "targets page lists A 846 m +3.0 and B empty");
+    g_pin_input[BTN_MODE] = LOW; spin(100); g_pin_input[BTN_MODE] = HIGH; spin(300);
+    g_pin_input[BTN_MODE] = LOW; spin(100); g_pin_input[BTN_MODE] = HIGH; spin(300);
+    check(page == 0, "MODE cycles shooting -> targets -> sensors -> shooting");
+    command({meridian::kCmdSaveTarget, 2}); spin(20);
+    check(lastCmdResult == 0 && (targets[2].flags & meridian::kTargetSaved) && std::fabs(targets[2].range_m - 845.6) < 0.06,
+          "save-target command stores the same range as C");
+    spin(10000);
+    command({meridian::kCmdSaveTarget, 255}); spin(20);
+    check(lastCmdResult == 2 && targets[1].flags == 0, "a range older than 10 s can't be saved");
+    for (auto& t : targets) t = meridian::Target{};
+    loadSettings();
+    check((targets[0].flags & meridian::kTargetSaved) && std::fabs(targets[2].range_m - 845.6) < 0.06 && targets[1].flags == 0,
+          "saved targets survive power-off");
+    n0 = g_notifs().size();
+    command({meridian::kCmdSendTargets}); spin(20);
+    int tcount = 0; for (size_t i = n0; i < g_notifs().size(); ++i) if (g_notifs()[i].uuid == MR_UUID_TARGET) ++tcount;
+    check(tcount == 3, "send-targets notifies all three slots", tcount, 3);
+    command({meridian::kCmdClearTargets, 0}); spin(20);
+    check(targets[0].flags == 0 && (targets[2].flags & meridian::kTargetSaved), "clear-targets A leaves C");
+    command({meridian::kCmdClearTargets, 255}); spin(20);
+    check(targets[2].flags == 0, "clear-targets all");
+
+    // ---- Idle auto-sleep ----
+    command({meridian::kCmdAutoSleep, 1}); spin(20);
+    check(autoSleepMin == 1, "autosleep set to 1 minute");
+    spin(35000);
+    check(!g_sleepStarted && screenLine(224).rfind("SLEEP IN", 0) == 0, "30 s before sleeping the screen warns");
+    setQuat(qaxis(1, 0, 0, 9)); spin(300);
+    check(screenLine(224).rfind("SLEEP IN", 0) != 0, "moving the rifle counts as use and clears the warning");
+    spin(50000);
+    check(!g_sleepStarted, "not asleep 50 s after the rifle moved");
+    g_fuel_v = 4.19f;                                   // on USB: the charge detector reads a full, rising cell
+    for (int i = 0; i < 6; ++i) { chargeDet.feed(4100.0f + i * 20); }
+    batt_charging = true;
+    spin(500);
+    check(autoSleepRemainingMs() < 0, "no auto-sleep countdown while charging");
+    batt_charging = false; g_fuel_v = 3.90f; chargeDet = ChargeDetector{};
+    spin(61000);
+    check(g_sleepStarted, "after a minute with no use Meridian sleeps");
+    noteActivity(); sleepRequested = false;              // a real sleep reboots on wake; the stub carries on
+    g_sleepStarted = false;
+    command({meridian::kCmdAutoSleep, 0}); spin(20);
+    spin(130000);
+    check(!g_sleepStarted, "autosleep 0 = never");
+
     // Sleep from a long MODE press.
     g_pin_input[BTN_MODE] = LOW; spin(3200); g_pin_input[BTN_MODE] = HIGH; spin(100);
     check(g_sleepStarted, "holding MODE 3 s puts Meridian to sleep");

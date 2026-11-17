@@ -41,6 +41,14 @@ check(t["version"] == mc.VERSION and t["mount"] == 10 and t["units"] == "MOA" an
 check(t["heading_offset"] == 93.5 and t["declination"] == 11.5 and t["laser_offset_m"] == 0.3 and t["target_mode"] == "last"
       and t["last_corr_seq"] == 42 and t["centrals"] == 2 and t["laser"] == "idle", "status: other fields")
 
+g = mc.unpack_target(bytes.fromhex(enc["target"]))
+check(g["slot"] == "B" and g["saved"] and g["true_north"] and g["gps"] and g["range_m"] == 845.6 and g["incline_deg"] == 3.05
+      and g["bearing_deg"] == 271.43 and g["lat_deg"] == 45.5 and g["lon_deg"] == -111.75 and g["utc"] == 1794772800, "target: every field")
+check(run("command", mc.pack_command("save_target", "C").hex()) == "16 0.000 2", "command: save target C")
+check(run("command", mc.pack_command("save_target", "next").hex()) == "16 0.000 255", "command: save target next")
+check(run("command", mc.pack_command("clear_targets", "all").hex()) == "17 0.000 255", "command: clear all targets")
+check(run("command", mc.pack_command("send_targets").hex()) == "18 0.000 0", "command: send targets")
+check(run("command", mc.pack_command("autosleep", 15).hex()) == "19 0.000 15", "command: autosleep 15")
 c = mc.pack_correction(7.43, -1.27, range_m=803.5, tof_s=1.234, lead_mrad=2.5, hit_pct=64, target=3, wind_mps=4.47,
                        wind_from_deg=270, seq=513, miss_adjusted=True)
 check(len(c) == 20, "correction: 20 bytes")

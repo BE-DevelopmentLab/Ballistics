@@ -9,7 +9,7 @@ not "the board".
 
 - **Written 2026-11-15 before any Meridian parts arrived. Nothing here has run on hardware.** It has not been built
   with PlatformIO either (the cloud session could not download the toolchain). First job on the laptop: `pio run`.
-- `./run_tests.sh` builds and runs the PC tests (147 checks: packets, laser frames, GPS sentences, rifle angles,
+- `./run_tests.sh` builds and runs the PC tests (180 checks: packets, laser frames, GPS sentences, rifle angles,
   screen text, the whole firmware loop against stub hardware, and the Python client against the C++ packets).
   It must stay green after any change.
 - **Laser protocol checked against ERDI's LRF0306C manual** (`../LRF0306C.pdf`, 2026-11-15): 115200 8N1, frames
@@ -34,7 +34,7 @@ not "the board".
 | PA1010D mini GPS | STEMMA QT / I2C | 0x10 |
 | 1.3" 240x240 TFT (ST7789) | SPI | SCK 36, MOSI 35, CS D10 (GPIO 10), DC D9 (GPIO 9), RST to RESET, backlight D5 (GPIO 5) |
 | RANGE button | to GND | D11 (GPIO 11): press = range, hold 1 s = continuous on/off |
-| MODE button | to GND | D12 (GPIO 12): press = next page, hold 3 s = sleep; press again to wake |
+| MODE button | to GND | D12 (GPIO 12): press within 10 s of a range = save it as the next target (A, B, C); otherwise press = next page; hold 3 s = sleep; press again to wake |
 | Battery gauge (on the Feather) | I2C | MAX17048 0x36, or LC709203F 0x0B on older boards (both handled) |
 
 - GPIO 7 (`I2C_POWER`) switches the STEMMA QT power and must be HIGH before any I2C part answers (done in `setup()`).
@@ -66,6 +66,11 @@ Meridian advertises as `Meridian`. Up to 4 links at once (phone, spotter, and Me
      units, laser offset, first/last target, Solstice link on/off, sleep.
    - MESSAGE (write): up to 20 characters for the bottom line ("SEND IT").
    - STATUS (notify 1 Hz and after each command): calibration values, last command result, links, laser state.
+   - TARGET (notify, read): a saved target A, B or C: line-of-sight range, incline and bearing at the moment of the
+     laser shot, the shooter's GPS position and the time. Notified on save or clear, and for all three slots after
+     the `send_targets` command. This is the capture step for the future target map and stage planner.
+   - Commands added 2026-11-17: `save_target` (A, B, C or next), `clear_targets` (one or all), `send_targets`,
+     `autosleep` (minutes, 0 = never). None of this touches the Solstice service, so Solstice and the app are unchanged.
 3. **Wind from Solstice:** Meridian scans for a device named `Solstice` with the Solstice service and subscribes to
    its env packet. Solstice keeps advertising while a link is open (change approved by Brad 2026-11-15, in the
    laptop's Solstice `main.cpp`), so the phone and Meridian can both connect to it. Solstice firmware older than
@@ -77,11 +82,25 @@ software can import its `pack_correction()` / `unpack_shot()` functions.
 
 ## Screen
 
+Pages (MODE cycles them): 1 shooting, 2 saved targets, 3 setup.
+
 Page 1 (shooting): source (SPOTTER / MERIDIAN / NO SOLUTION) and units, battery and links, elevation and windage in
 big text, range (or RANGING / NO TARGET / LASER FAULT), lead or hit chance, a cant bar (red past 1 degree), pitch and
-bearing, the spotter's message. Page 2 (setup): sensors, GPS, laser, calibration. With no spotter, Meridian solves
+bearing, the spotter's message. The message line also shows Meridian's own notes: "MODE: SAVE AS A" after a
+range, "SAVED A 846 m", and "SLEEP IN 30s". Page 2 lists targets A, B, C. Page 3 (setup): sensors, GPS, laser,
+calibration. With no spotter, Meridian solves
 for itself once the phone app has sent the rifle profile: laser range, BNO085 angles, GPS latitude, Solstice wind,
 and the wind direction and spin/Coriolis/jump switches from the app's last request.
+
+## Saved targets and auto-sleep (added 2026-11-17)
+
+- **Targets:** range with RANGE, then press MODE within 10 s. The range, plus the incline and bearing taken at the
+  instant of the laser shot (not when MODE is pressed), go into the next slot in turn (A, B, C, then A again). Saved
+  targets survive power-off (NVS). The same range is never saved twice by the button; a second MODE press changes page.
+- **Auto-sleep:** after 10 minutes with no use (default; `autosleep <minutes>`, 0 = never, max 120) Meridian goes
+  into the same deep sleep as a manual sleep, and MODE wakes it. Use = any button, a laser range, any write from the
+  phone or spotter, or moving the rifle more than 2 degrees, so it won't sleep while you are aiming. It never sleeps
+  while charging or in continuous ranging. The screen warns for the last 30 s. Not exposed in STATUS (no spare byte).
 
 ## Bring-up plan (when the parts arrive)
 

@@ -31,6 +31,7 @@ constexpr uint8_t kVersion = 1;
 #define MR_UUID_COMMAND    "b4a20004-1d5b-4c0e-9a3f-5e7d2c0a1b00"  // write: range, calibrate, settings
 #define MR_UUID_MESSAGE    "b4a20005-1d5b-4c0e-9a3f-5e7d2c0a1b00"  // write: short text for the screen
 #define MR_UUID_STATUS     "b4a20006-1d5b-4c0e-9a3f-5e7d2c0a1b00"  // notify/read: setup and health
+#define MR_UUID_TARGET     "b4a20007-1d5b-4c0e-9a3f-5e7d2c0a1b00"  // notify/read: saved targets A, B, C
 
 inline void put_i32(uint8_t* p, int32_t v) {
     const uint32_t u = static_cast<uint32_t>(v);
@@ -211,6 +212,10 @@ enum Cmd : uint8_t {
     kCmdSolsticeLink = 13,     // u8 1 = pull wind from Solstice over Bluetooth, 0 = don't
     kCmdSleep = 14,            // deep sleep; the MODE button wakes it
     kCmdClearHeading = 15,     // forget the heading offset from kCmdAimBearing
+    kCmdSaveTarget = 16,       // u8 slot 0 = A, 1 = B, 2 = C, 255 = next: save the latest laser range as a target
+    kCmdClearTargets = 17,     // u8 slot 0..2, or 255 = all
+    kCmdSendTargets = 18,      // notify every saved target on TARGET, one packet each
+    kCmdAutoSleep = 19,        // u8 minutes without use before Meridian sleeps (0 = never, max 120)
 };
 
 struct Command {
@@ -224,7 +229,7 @@ inline bool decode_command(const uint8_t* d, size_t n, Command& c) {
     c.cmd = d[0];
     switch (c.cmd) {
         case kCmdRange: case kCmdLevelZero: case kCmdClearLevel: case kCmdMagCalStart:
-        case kCmdMagCalSave: case kCmdSleep: case kCmdClearHeading:
+        case kCmdMagCalSave: case kCmdSleep: case kCmdClearHeading: case kCmdSendTargets:
             return true;
         case kCmdContinuous: case kCmdSolsticeLink:
             if (n < 2 || d[1] > 1) return false;
@@ -234,6 +239,12 @@ inline bool decode_command(const uint8_t* d, size_t n, Command& c) {
             c.u = d[1]; return true;
         case kCmdTargetMode:
             if (n < 2 || d[1] < 1 || d[1] > 2) return false;
+            c.u = d[1]; return true;
+        case kCmdSaveTarget: case kCmdClearTargets:
+            if (n < 2 || (d[1] > 2 && d[1] != 255)) return false;
+            c.u = d[1]; return true;
+        case kCmdAutoSleep:
+            if (n < 2 || d[1] > 120) return false;
             c.u = d[1]; return true;
         case kCmdMount:
             if (n < 2 || d[1] > 23) return false;
@@ -303,6 +314,47 @@ inline void encode_status(const Status& s, uint8_t* out) {
     out[14] = s.target_mode; out[15] = s.last_result;
     put_u16(out + 16, s.last_corr_seq);
     out[18] = s.centrals; out[19] = s.laser;
+}
+
+// ---- TARGET (Meridian -> app/spotter notify and read, 20 bytes) ----------------------------------------
+// A target saved with the RANGE button then MODE (or kCmdSaveTarget): where it was from the shooter at the moment
+// of the laser shot. Notified when saved or cleared, and for every slot after kCmdSendTargets. A read returns the
+// last one notified. This is the capture step for the future target map and stage planner.
+// 0 u8 slot (0 = A, 1 = B, 2 = C) | 1 u8 flags
+// 2 u16 line-of-sight range (0.1 m) | 4 i16 incline (0.01 deg, + = uphill) | 6 u16 bearing (0.01 deg)
+// 8 i32 shooter latitude (1e-7 deg) | 12 i32 shooter longitude (1e-7 deg) | 16 u32 UTC when saved (0 = unknown)
+constexpr size_t kTargetSize = 20;
+constexpr uint8_t kMaxTargets = 3;
+constexpr uint8_t kTargetSaved = 0x01;      // clear = this slot is empty
+constexpr uint8_t kTargetTrueNorth = 0x02;  // bearing is true (declination or aim-bearing set), else magnetic
+constexpr uint8_t kTargetGps = 0x04;        // shooter lat/lon came from a GPS fix
+constexpr uint8_t kTargetImu = 0x08;        // incline and bearing came from the BNO085
+
+struct Target {
+    uint8_t slot = 0, flags = 0;
+    double range_m = 0, incline_deg = 0, bearing_deg = 0, lat_deg = 0, lon_deg = 0;
+    uint32_t utc = 0;
+};
+
+inline char target_letter(uint8_t slot) { return static_cast<char>('A' + (slot < kMaxTargets ? slot : 0)); }
+
+inline void encode_target(const Target& t, uint8_t* out) {
+    std::memset(out, 0, kTargetSize);
+    out[0] = t.slot; out[1] = t.flags;
+    put_u16(out + 2, clamp_u16(t.range_m * 10.0));
+    put_i16(out + 4, clamp_i16(t.incline_deg * 100.0));
+    put_u16(out + 6, static_cast<uint16_t>(clamp_u16(wrap360(t.bearing_deg) * 100.0) % 36000));
+    put_i32(out + 8, static_cast<int32_t>(std::llround(t.lat_deg * 1e7)));
+    put_i32(out + 12, static_cast<int32_t>(std::llround(t.lon_deg * 1e7)));
+    put_u32(out + 16, t.utc);
+}
+
+inline Target decode_target(const uint8_t* d) {
+    Target t;
+    t.slot = d[0]; t.flags = d[1];
+    t.range_m = get_u16(d + 2) / 10.0; t.incline_deg = get_i16(d + 4) / 100.0; t.bearing_deg = get_u16(d + 6) / 100.0;
+    t.lat_deg = get_i32(d + 8) / 1e7; t.lon_deg = get_i32(d + 12) / 1e7; t.utc = get_u32(d + 16);
+    return t;
 }
 
 // ---- Solstice ENV packet, as Meridian receives it when it pulls wind from Solstice ------------------

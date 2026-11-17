@@ -68,6 +68,19 @@ static void test_protocol() {
     const uint8_t t1[] = {meridian::kCmdTargetMode, 2}; check(meridian::decode_command(t1, 2, k) && k.u == 2, "command: last-target mode");
     const uint8_t x1[] = {99}; check(!meridian::decode_command(x1, 1, k), "command: unknown rejected");
 
+    meridian::Target tg; tg.slot = 2; tg.flags = meridian::kTargetSaved | meridian::kTargetGps; tg.range_m = 1234.5;
+    tg.incline_deg = -4.56; tg.bearing_deg = 359.999; tg.lat_deg = -45.1234567; tg.lon_deg = 170.7654321; tg.utc = 1794772800;
+    meridian::encode_target(tg, b);
+    const meridian::Target tg2 = meridian::decode_target(b);
+    check(tg2.slot == 2 && tg2.flags == tg.flags && near(tg2.range_m, 1234.5, 0.051) && near(tg2.incline_deg, -4.56, 0.006) &&
+          near(tg2.bearing_deg, 0, 0.01) && near(tg2.lat_deg, -45.1234567, 1e-7) && near(tg2.lon_deg, 170.7654321, 1e-7) && tg2.utc == 1794772800,
+          "target: every field round-trips (bearing 359.999 wraps to 0)");
+    check(meridian::target_letter(0) == 'A' && meridian::target_letter(2) == 'C', "target: slots are A, B, C");
+    const uint8_t st1[] = {meridian::kCmdSaveTarget, 255}; check(meridian::decode_command(st1, 2, k) && k.u == 255, "command: save target (next)");
+    const uint8_t st2[] = {meridian::kCmdSaveTarget, 3}; check(!meridian::decode_command(st2, 2, k), "command: save target slot 3 rejected");
+    const uint8_t as1[] = {meridian::kCmdAutoSleep, 15}; check(meridian::decode_command(as1, 2, k) && k.u == 15, "command: autosleep 15 min");
+    const uint8_t as2[] = {meridian::kCmdAutoSleep, 121}; check(!meridian::decode_command(as2, 2, k), "command: autosleep over 120 rejected");
+
     char msg[21];
     const uint8_t ok[] = {'S', 'E', 'N', 'D', ' ', 'I', 'T'};
     check(meridian::decode_message(ok, 7, msg) && std::string(msg) == "SEND IT", "message: plain text accepted");

@@ -14,6 +14,8 @@ Bench use (needs `pip install bleak`):
   python meridian_client.py level | clear-level | clear-heading | magcal-start | magcal-save | sleep
   python meridian_client.py declination 11.5 | aim 270 | mount 10 | units moa | laser-offset 0.3 |
                             target first|last | continuous on|off | solstice on|off
+  python meridian_client.py save-target A|B|C|next | clear-targets A|B|C|all | targets
+  python meridian_client.py autosleep 10            minutes without use before sleeping (0 = never)
 """
 import argparse
 import asyncio
@@ -27,6 +29,7 @@ CORRECTION = "b4a20003-1d5b-4c0e-9a3f-5e7d2c0a1b00"
 COMMAND = "b4a20004-1d5b-4c0e-9a3f-5e7d2c0a1b00"
 MESSAGE = "b4a20005-1d5b-4c0e-9a3f-5e7d2c0a1b00"
 STATUS = "b4a20006-1d5b-4c0e-9a3f-5e7d2c0a1b00"
+TARGET = "b4a20007-1d5b-4c0e-9a3f-5e7d2c0a1b00"
 VERSION = 1
 
 # SHOT flags
@@ -35,7 +38,8 @@ RANGE_VALID, IMU_OK, BME_OK, GPS_FIX, TRUE_NORTH, RANGING, CHARGING, LASER_FAULT
 CORR_VALID, CORR_MISS_ADJUSTED, CORR_HAS_LEAD, CORR_CLEAR = 0x01, 0x02, 0x04, 0x80
 # COMMAND codes
 CMD = dict(range=1, continuous=2, level=3, clear_level=4, declination=5, aim=6, mount=7, magcal_start=8,
-           magcal_save=9, units=10, laser_offset=11, target=12, solstice=13, sleep=14, clear_heading=15)
+           magcal_save=9, units=10, laser_offset=11, target=12, solstice=13, sleep=14, clear_heading=15,
+           save_target=16, clear_targets=17, send_targets=18, autosleep=19)
 
 
 def _clamp(v, lo, hi):
@@ -66,6 +70,18 @@ def unpack_status(b):
                 centrals=centrals, laser=["absent", "idle", "busy", "continuous", "fault"][laser] if laser < 5 else laser)
 
 
+def unpack_target(b):
+    slot, flags, rng, inc, brg, lat, lon, utc = struct.unpack("<BBHhHiiI", bytes(b))
+    return dict(slot="ABC"[slot] if slot < 3 else slot, saved=bool(flags & 1), true_north=bool(flags & 2),
+                gps=bool(flags & 4), imu=bool(flags & 8), range_m=rng / 10, incline_deg=inc / 100, bearing_deg=brg / 100,
+                lat_deg=lat / 1e7, lon_deg=lon / 1e7, utc=utc)
+
+
+def _slot(v):
+    v = str(v).strip().upper()
+    return 255 if v in ("NEXT", "ALL") else "ABC".index(v) if v in ("A", "B", "C") else int(v)
+
+
 def pack_correction(elev_mrad, wind_mrad, range_m=0.0, tof_s=0.0, lead_mrad=None, hit_pct=None, target=0,
                     wind_mps=0.0, wind_from_deg=0.0, seq=0, miss_adjusted=False, valid=True, clear=False):
     flags = (CORR_VALID if valid else 0) | (CORR_MISS_ADJUSTED if miss_adjusted else 0) | \
@@ -81,7 +97,9 @@ def pack_command(name, value=None):
     code = CMD[name]
     if name in ("declination", "aim", "laser_offset"):
         return struct.pack("<Bf", code, float(value))
-    if name in ("continuous", "solstice", "units", "target", "mount"):
+    if name in ("save_target", "clear_targets"):
+        return struct.pack("<BB", code, _slot(value))
+    if name in ("continuous", "solstice", "units", "target", "mount", "autosleep"):
         return struct.pack("<BB", code, int(value))
     return struct.pack("<B", code)
 
@@ -135,6 +153,14 @@ async def main_async(a):
                 print("no new range (no target, laser fault, or laser not answering); status:",
                       unpack_status(await c.read_gatt_char(STATUS)))
             return
+        if a.cmd == "targets":
+            got = []
+            await c.start_notify(TARGET, lambda _, b: got.append(unpack_target(b)))
+            await c.write_gatt_char(COMMAND, pack_command("send_targets"), response=True)
+            await asyncio.sleep(1.0)
+            for t in got:
+                print(t)
+            return
         if a.cmd == "correct":
             await c.write_gatt_char(CORRECTION, pack_correction(a.elev, a.wind, range_m=a.range, hit_pct=a.hit, seq=a.seq), response=True)
         elif a.cmd == "message":
@@ -163,12 +189,13 @@ def main():
     c = sub.add_parser("correct"); c.add_argument("elev", type=float); c.add_argument("wind", type=float)
     c.add_argument("--range", type=float, default=0); c.add_argument("--hit", type=int); c.add_argument("--seq", type=int, default=1)
     m = sub.add_parser("message"); m.add_argument("text")
-    for n in ("level", "clear-level", "clear-heading", "magcal-start", "magcal-save", "sleep"):
+    for n in ("level", "clear-level", "clear-heading", "magcal-start", "magcal-save", "sleep", "targets"):
         sub.add_parser(n)
-    for n in ("declination", "aim", "mount", "units", "laser-offset", "target", "continuous", "solstice"):
+    for n in ("declination", "aim", "mount", "units", "laser-offset", "target", "continuous", "solstice",
+              "save-target", "clear-targets", "autosleep"):
         sub.add_parser(n).add_argument("value")
     a = p.parse_args()
-    if a.cmd in ("mount",):
+    if a.cmd in ("mount", "autosleep"):
         a.value = int(a.value)
     asyncio.run(main_async(a))
 
