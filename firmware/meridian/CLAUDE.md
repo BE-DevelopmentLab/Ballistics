@@ -48,7 +48,7 @@ not "the board".
 
 ## Bluetooth
 
-Meridian advertises as `Meridian`. Up to 4 links at once (phone, spotter, and Meridian's own link to Solstice).
+Meridian advertises as `Meridian`. Up to 3 links at once (phone, spotter, and Meridian's own link to Solstice; the ESP32 Arduino core caps NimBLE at 3).
 
 1. **Solstice service** (`b4a10000-...`), byte for byte the same as Solstice. Today's phone app connects to Meridian
    and works unchanged: profile, live solution, range card, env readings, battery, Sleep button. Meridian answers

@@ -452,7 +452,6 @@ static void setupBle() {
     sol->createCharacteristic(BC_UUID_CARD, NIMBLE_PROPERTY::WRITE)->setCallbacks(new CardCb());
     chSolution = sol->createCharacteristic(BC_UUID_SOLUTION, NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ);
     chEnv = sol->createCharacteristic(BC_UUID_ENV, NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ);
-    sol->start();
 
     // 2. Meridian service: for the spotter (and a future Meridian page in the app).
     NimBLEService* mr = server->createService(MR_UUID_SERVICE);
@@ -463,7 +462,6 @@ static void setupBle() {
     mr->createCharacteristic(MR_UUID_MESSAGE, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR)->setCallbacks(new MessageCb());
     chStatus = mr->createCharacteristic(MR_UUID_STATUS, NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ);
     chTarget = mr->createCharacteristic(MR_UUID_TARGET, NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ);
-    mr->start();
 
     // Advertising packet: the Solstice service UUID (so the phone app's device chooser lists Meridian).
     // Scan response: the name and the Meridian service UUID (so the spotter can find it). 31 bytes each.

@@ -11,7 +11,7 @@
 #include <vector>
 #include "Arduino.h"
 
-#define CONFIG_BT_NIMBLE_MAX_CONNECTIONS 4
+#define CONFIG_BT_NIMBLE_MAX_CONNECTIONS 3   // the ESP32 Arduino core sdkconfig sets 3
 struct NimBLEConnInfo {};
 struct NimBLEAttValue {
     std::vector<uint8_t> v;
