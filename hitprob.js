@@ -58,6 +58,17 @@
     };
   }
 
+  // How far the come-up moves (mrad) per +1% BC, from the phone's copy of the solver (web/solver.js)
+  // solved at BC +/- 1% in the given conditions. Returns null if the solver is not loaded or cannot solve.
+  // cfg: the profile (SI, as readConfig()). atm: { tempC, pressureHpa, rhPct }. shot: Solver shot.
+  function bcSensitivity(cfg, atm, shot, rangeM) {
+    const S = (typeof module !== 'undefined' && module.exports) ? require('./solver.js') : root.Solver;
+    if (!S || !cfg || !atm || !(rangeM > 0)) return null;
+    const at = (k) => S.solve(Object.assign({}, cfg, { bc: cfg.bc * k }), atm, shot || {}, rangeM);
+    const hi = at(1.01), lo = at(0.99);
+    return hi.ok && lo.ok ? (hi.elevationMrad - lo.elevationMrad) / 2 : null;
+  }
+
   // Per-axis standard deviation (mrad) of a group measured as extreme spread in MOA.
   function groupSigmaMrad(esMoa, shots) {
     const k = ES_PER_SIGMA[shots] || ES_PER_SIGMA[5];
@@ -88,12 +99,17 @@
 
   // Everything together.
   // in: { muzzleMps, tofS, velocityMps, rangeM, zeroRangeM, sightHeightM,       (from the board and profile)
-  //       groupMoa, groupShots, mvSdMps, windErrMps, rangeErrM,               (how good the inputs are, 1 sigma)
+  //       groupMoa, groupShots, mvSdMps, windErrMps, rangeErrM, bcErrPct,     (how good the inputs are, 1 sigma)
+  //       mradPerBcPct (from bcSensitivity; needed when bcErrPct > 0),
   //       shape, widthM, heightM, trials, seed }
-  // out: { p, sigmaXMrad, sigmaYMrad, parts: { group, mv, range, wind } (mrad, 1 sigma), biggest, err }
+  // out: { p, sigmaXMrad, sigmaYMrad, parts: { group, mv, range, wind, bc } (mrad, 1 sigma), biggest, targetWMrad, targetHMrad, err }
+  // Only the one target given is assessed. Its size is what decides the answer: a target smaller than the
+  // scatter gives a low chance however good the hold is.
   function assess(i) {
     if (!(i.widthM > 0) || (i.shape !== 'circle' && !(i.heightM > 0))) return { err: 'Enter the target size.' };
-    if (![i.groupMoa, i.mvSdMps, i.windErrMps, i.rangeErrM].every((x) => Number.isFinite(x) && x >= 0)) return { err: 'Spreads must be 0 or more.' };
+    const bcErr = i.bcErrPct === undefined || i.bcErrPct === null ? 0 : i.bcErrPct;
+    if (![i.groupMoa, i.mvSdMps, i.windErrMps, i.rangeErrM, bcErr].every((x) => Number.isFinite(x) && x >= 0)) return { err: 'Spreads must be 0 or more.' };
+    if (bcErr > 0 && !Number.isFinite(i.mradPerBcPct)) return { err: 'Cannot work out the BC effect for this shot.' };
     const s = sensitivities(i);
     if (!s) return { err: 'Needs a solution from Solstice first.' };
     const parts = {
@@ -101,18 +117,20 @@
       mv: Math.abs(s.mradPerMvMps) * i.mvSdMps,
       range: Math.abs(s.mradPerRangeM) * i.rangeErrM,
       wind: Math.abs(s.mradPerWindMps) * i.windErrMps,
+      bc: bcErr > 0 ? Math.abs(i.mradPerBcPct) * bcErr : 0,
     };
     const sigmaXMrad = Math.hypot(parts.group, parts.wind);
-    const sigmaYMrad = Math.hypot(parts.group, parts.mv, parts.range);
+    const sigmaYMrad = Math.hypot(parts.group, parts.mv, parts.range, parts.bc);
     const toM = i.rangeM / 1000;
     const p = monteCarlo(sigmaXMrad * toM, sigmaYMrad * toM, i.shape, i.widthM, i.heightM, { trials: i.trials, seed: i.seed });
     // The group counts on both axes; the others on one.
-    const share = { group: 2 * parts.group ** 2, mv: parts.mv ** 2, range: parts.range ** 2, wind: parts.wind ** 2 };
+    const share = { group: 2 * parts.group ** 2, mv: parts.mv ** 2, range: parts.range ** 2, wind: parts.wind ** 2, bc: parts.bc ** 2 };
     const biggest = Object.keys(share).reduce((a, b) => (share[b] > share[a] ? b : a));
-    return { p, sigmaXMrad, sigmaYMrad, parts, biggest, sens: s, err: null };
+    const targetWMrad = i.widthM / toM, targetHMrad = (i.shape === 'circle' ? i.widthM : i.heightM) / toM;
+    return { p, sigmaXMrad, sigmaYMrad, parts, biggest, sens: s, targetWMrad, targetHMrad, err: null };
   }
 
-  const HitProb = { sensitivities, groupSigmaMrad, monteCarlo, assess, ES_PER_SIGMA };
+  const HitProb = { sensitivities, bcSensitivity, groupSigmaMrad, monteCarlo, assess, ES_PER_SIGMA };
   if (typeof module !== 'undefined' && module.exports) module.exports = HitProb;
   else root.HitProb = HitProb;
 })(typeof self !== 'undefined' ? self : this);

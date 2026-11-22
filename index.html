@@ -142,10 +142,10 @@
   </div>
   <div class="row gap">
     <div><label id="lHitRange">Range error</label><input id="hitRange" type="number" inputmode="decimal" value="5"></div>
-    <div></div>
+    <div><label>BC uncertainty (%)</label><input id="hitBc" type="number" inputmode="decimal" step="0.5" value="2"></div>
   </div>
   <div id="hitNote" class="note"></div>
-  <div class="note">Uses the current solution. Errors are typical (one standard deviation): how far off your wind call or range usually is. A laser rangefinder is about 1 to 2 yd; a guessed range is often 5% or more. Group size is the extreme spread of your usual groups (it covers you and the rifle); velocity SD comes from a chronograph.</div>
+  <div class="note">Uses the current solution. Errors are typical (one standard deviation): how far off your wind call or range usually is. A laser rangefinder is about 1 to 2 yd; a guessed range is often 5% or more. Group size is the extreme spread of your usual groups (it covers you and the rifle); velocity SD comes from a chronograph. BC uncertainty is how far the BC you use could be off: about 2% for a trued BC, 5% or more for a box BC. Only this one target is assessed, and its size matters most: a target smaller than your group gives a low chance however good the hold is.</div>
 </section>
 
 <section id="secCard" class="adv-only">
@@ -514,7 +514,7 @@ const isConnected = () => !!(device && device.gatt && device.gatt.connected && c
 const FIELDS = ['model','bc','mv','sight','zero','zt','zp','zh','range','windDir','windSrc','windManual','slopeSrc','slopeManual',
                 'angUnit','units','cardStart','cardStep','cardCount',
                 'bmass','bdia','blen','btw','btdir','spinOn','aeroOn','corOn','lat','azSrc','azManual','tgtDir','tgtSpeed','tgtDelay',
-                'hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange','ldPowder','ldCharge','ldNotes','grpDist','grpScaleIn','trueMvSrc','stgOrder','stgLow','tgShape','tgW','tgH','tgShots','blName','blWeight','blDia','blType','blBc','blModel'];
+                'hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange','hitBc','ldPowder','ldCharge','ldNotes','grpDist','grpScaleIn','trueMvSrc','stgOrder','stgLow','tgShape','tgW','tgH','tgShots','blName','blWeight','blDia','blType','blBc','blModel'];
 // This handheld has no tilt/compass sensor (the BNO085 comes with the rifle unit in version 2),
 // so slope and shooting direction are always typed in. This also fixes older saved settings.
 const HAS_ORIENTATION_SENSOR = false;
@@ -783,7 +783,7 @@ function renderLead(s) {
     '. Total hold with wind: ' + (tot >= 0 ? 'RIGHT ' : 'LEFT ') + fmt(Math.abs(tot), 2) + ' ' + a.name + '.';
 }
 // ---- hit chance (phone side, from the board's solution; maths in hitprob.js) ----------------
-const HIT_NAMES = { group: 'your group size', mv: 'velocity spread', range: 'range error', wind: 'wind call error' };
+const HIT_NAMES = { group: 'your group size', mv: 'velocity spread', range: 'range error', wind: 'wind call error', bc: 'BC uncertainty' };
 const fieldNum = (id) => (String($(id).value).trim() === '' ? NaN : +$(id).value);
 function hitInputs(s) {
   const u = unit(), cfg = readConfig();
@@ -793,11 +793,26 @@ function hitInputs(s) {
     shape: $('hitShape').value, widthM: u.tsize[1](fieldNum('hitW')), heightM: u.tsize[1](fieldNum('hitH')),
     groupMoa: fieldNum('hitGroup'), groupShots: +$('hitShots').value, mvSdMps: RIFLE.speed[1](fieldNum('hitSd')),
     windErrMps: u.wind[1](fieldNum('hitWind')), rangeErrM: u.range[1](fieldNum('hitRange')),
+    bcErrPct: fieldNum('hitBc'), mradPerBcPct: s ? bcEffect(cfg, s.rangeM > 0 ? s.rangeM : readRequest().rangeM) : NaN,
   };
+}
+// How far the come-up moves per 1% BC at this range, from the phone's solver copy in the same conditions.
+function bcEffect(cfg, rangeM) {
+  if (![cfg.bc, cfg.muzzleMps, cfg.zeroRangeM].every(v => v > 0)) return NaN;
+  const c = stageConditions(), k = HitProb.bcSensitivity(cfg, c.atm, c.shot, rangeM);
+  return k === null ? NaN : k;
 }
 function targetText() {
   const u = unit(), w = fieldNum('hitW'), h = fieldNum('hitH');
   return $('hitShape').value === 'circle' ? w + ' ' + u.tsize[0] + ' round plate' : w + ' x ' + h + ' ' + u.tsize[0] + ' target';
+}
+// The target's size as an angle, next to the spread, so a small target explains a low chance.
+function targetSizeText(r) {
+  const a = angle(), moa = (mrad) => fmt(mrad / 0.290888, 2), circ = $('hitShape').value === 'circle';
+  const size = circ ? moa(r.targetWMrad) + ' MOA (' + fmt(r.targetWMrad, 2) + ' MIL) across'
+    : moa(r.targetWMrad) + ' x ' + moa(r.targetHMrad) + ' MOA (' + fmt(r.targetWMrad, 2) + ' x ' + fmt(r.targetHMrad, 2) + ' MIL)';
+  const spread = 2 * Math.max(r.sigmaXMrad, r.sigmaYMrad), small = Math.min(r.targetWMrad, r.targetHMrad) < spread;
+  return 'The target is ' + size + ' at this range' + (small ? ', smaller than your likely spread of ' + moa(spread) + ' MOA, so even a perfect hold misses often.' : '.');
 }
 function renderHit(s) {
   const u = unit();
@@ -813,7 +828,7 @@ function renderHit(s) {
   $('hitPct').textContent = pct + '%';
   $('hitSub').textContent = 'first-round hit chance, ' + targetText();
   setNote('hitNote', 'Typical miss (1 SD): ' + toLen(r.sigmaXMrad) + ' left/right, ' + toLen(r.sigmaYMrad) + ' up/down (' +
-    fmt(r.sigmaXMrad * a.k, 2) + ' x ' + fmt(r.sigmaYMrad * a.k, 2) + ' ' + a.name + '). Biggest factor: ' + HIT_NAMES[r.biggest] + '.', pct < 50 ? 'warn' : '');
+    fmt(r.sigmaXMrad * a.k, 2) + ' x ' + fmt(r.sigmaYMrad * a.k, 2) + ' ' + a.name + '). Biggest factor: ' + HIT_NAMES[r.biggest] + '. ' + targetSizeText(r), pct < 50 ? 'warn' : '');
   $('outHit').textContent = 'Hit chance ' + pct + '% (' + targetText() + ').';
   return r;
 }
@@ -1177,7 +1192,7 @@ function stageConditions() {
 }
 function stageHit() {
   const h = hitInputs(null);
-  return [h.groupMoa, h.mvSdMps, h.windErrMps, h.rangeErrM].every(v => Number.isFinite(v) && v >= 0) ? { groupMoa: h.groupMoa, groupShots: h.groupShots, mvSdMps: h.mvSdMps, windErrMps: h.windErrMps, rangeErrM: h.rangeErrM } : null;
+  return [h.groupMoa, h.mvSdMps, h.windErrMps, h.rangeErrM, h.bcErrPct].every(v => Number.isFinite(v) && v >= 0) ? { groupMoa: h.groupMoa, groupShots: h.groupShots, mvSdMps: h.mvSdMps, windErrMps: h.windErrMps, rangeErrM: h.rangeErrM, bcErrPct: h.bcErrPct } : null;
 }
 let lastPlan = null;
 function renderStage() {
@@ -1428,7 +1443,7 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').ca
   ['cardStart','cardStep','cardCount'].forEach(f => $(f).addEventListener('input', () => { save(); queueCard(); }));
   $('angUnit').addEventListener('input', () => { save(); renderSolution(lastSol); renderCard(); renderLog(); });
   ['tgtDir','tgtSpeed','tgtDelay'].forEach(f => $(f).addEventListener('input', () => { save(); refreshLabels(); }));
-  ['hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange'].forEach(f => $(f).addEventListener('input', () => { save(); renderHit(lastSol); }));
+  ['hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange','hitBc'].forEach(f => $(f).addEventListener('input', () => { save(); renderHit(lastSol); }));
 
   // Shot log
   loadShots(); renderLog();

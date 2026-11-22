@@ -24,7 +24,7 @@
   // Plan the stage.
   // targets: list of targets (in the shooter's order).
   // o: { cfg (profile, SI), atm {tempC, pressureHpa, rhPct}, shot (Solver shot: wind, direction, slope, switches),
-  //      hit: { groupMoa, groupShots, mvSdMps, windErrMps, rangeErrM } (from the Hit chance section),
+  //      hit: { groupMoa, groupShots, mvSdMps, windErrMps, rangeErrM, bcErrPct } (from the Hit chance section),
   //      order: 'entered'|'near'|'far'|'odds', lowPct (flag below this, 0-100) }
   // Returns rows in run order: { target, step, sol (Solver solution), p (0-1 or null), low, dialUpMrad (change from the
   //   previous target), dialRightMrad }, plus totals { shots, expectedHits, hits, fired }.
@@ -33,7 +33,8 @@
       const sol = Solver.solve(o.cfg, o.atm, o.shot, t.rangeM);
       let p = null;
       if (sol.ok && o.hit) {
-        const a = HitProb.assess(Object.assign({}, o.hit, { muzzleMps: o.cfg.muzzleMps, zeroRangeM: o.cfg.zeroRangeM, sightHeightM: o.cfg.sightHeightM,
+        const bcK = o.hit.bcErrPct > 0 ? HitProb.bcSensitivity(o.cfg, o.atm, o.shot, t.rangeM) : null;
+        const a = HitProb.assess(Object.assign({}, o.hit, { mradPerBcPct: bcK === null ? NaN : bcK, muzzleMps: o.cfg.muzzleMps, zeroRangeM: o.cfg.zeroRangeM, sightHeightM: o.cfg.sightHeightM,
           tofS: sol.tofS, velocityMps: sol.velocityMps, rangeM: t.rangeM, shape: t.shape, widthM: t.widthM, heightM: t.heightM, trials: 8000 }));
         p = a.err ? null : a.p;
       }

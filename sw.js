@@ -1,6 +1,6 @@
 // Offline cache so the app opens with no signal after the first visit.
 // Bump CACHE when you change any file, or phones will keep serving the old copy.
-const CACHE = 'ballistics-v19';
+const CACHE = 'ballistics-v20';
 const FILES = ['./', './index.html', './protocol.js', './hitprob.js', './solver.js', './shotlog.js', './groupcalc.js', './stage.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
