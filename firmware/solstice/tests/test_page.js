@@ -308,7 +308,7 @@ check('new metric save: rifle fields not converted again', +els.mv.value === 260
   check('hit: no solution asks to connect', els.hitPct.textContent === '--' && /Connect/.test(els.hitNote.textContent), els.hitNote.textContent);
   const sol = { row: 0, ok: true, elevationMrad: 8, windageMrad: 1, tofS: 1.25, velocityMps: 400, rangeM: 731.5, windMps: 2 };
   els.hitShape.value = 'rect'; els.hitW.value = '18'; els.hitH.value = '18'; els.hitGroup.value = '1'; els.hitShots.value = '5';
-  els.hitSd.value = '10'; els.hitWind.value = '2'; els.hitRange.value = '5';
+  els.hitSd.value = '10'; els.hitWind.value = '2'; els.hitRange.value = '5'; els.hitBc.value = '0';
   t.renderSolution(sol);
   const pct = parseInt(els.hitPct.textContent, 10);
   check('hit: shows a percentage for an 800 yd shot', pct > 0 && pct < 100, els.hitPct.textContent);
@@ -318,6 +318,21 @@ check('new metric save: rifle fields not converted again', +els.mv.value === 260
   check('hit: inputs converted to SI (18 in, 10 fps, 2 mph, 5 yd)', Math.abs(hi.widthM - 0.4572) < 1e-6 && Math.abs(hi.mvSdMps - 3.048) < 1e-6 && Math.abs(hi.windErrMps - 0.89408) < 1e-6 && Math.abs(hi.rangeErrM - 4.572) < 1e-6);
   els.hitWind.value = '0'; t.renderSolution(sol);
   check('hit: perfect wind call raises the chance', parseInt(els.hitPct.textContent, 10) > pct, els.hitPct.textContent);
+  const pNoBc = t.renderHit(sol).p;
+  check('hit: BC effect worked out on the phone for this range', hi.mradPerBcPct < 0 && hi.bcErrPct === 0, hi.mradPerBcPct);
+  els.hitBc.value = '5'; const wBc = t.renderHit(sol);
+  check('hit: 5% BC uncertainty lowers the chance and adds vertical spread', wBc.p < pNoBc && wBc.parts.bc > 0, wBc.p + ' vs ' + pNoBc);
+  els.hitBc.value = '-1'; t.renderHit(sol);
+  check('hit: negative BC uncertainty is an error', els.hitPct.textContent === '--', els.hitNote.textContent);
+  els.hitBc.value = '2';
+  check('hit: note gives the target size in MOA and MIL', /The target is [\d.]+ x [\d.]+ MOA \([\d.]+ x [\d.]+ MIL\) at this range/.test(t.renderHit(sol) && els.hitNote.textContent), els.hitNote.textContent);
+  // A 0.5 MOA plate with a 2 MOA rifle: hard whatever the hold.
+  els.hitShape.value = 'circle'; els.hitGroup.value = '2'; els.hitW.value = String(+(0.5 * 1.047 * 731.5 / 0.9144 / 100).toFixed(2));
+  t.renderHit(sol);
+  check('hit: 2 MOA rifle on a 0.5 MOA plate is under 15%', parseInt(els.hitPct.textContent, 10) < 15, els.hitPct.textContent);
+  check('hit: and the note says the target is smaller than the spread', /0\.5\d? MOA .*smaller than your likely spread/.test(els.hitNote.textContent), els.hitNote.textContent);
+  check('hit: one target only, no range chart', !/hitChart|hitTable|hit chance by range/i.test(html));
+  els.hitShape.value = 'rect'; els.hitGroup.value = '1'; els.hitW.value = '18';
   els.hitShape.value = 'circle'; t.renderHit(sol);
   check('hit: round plate hides the height box and says Diameter', els.hitHBox.classList.contains('hide') && /Diameter \(in\)/.test(els.lHitW.textContent));
   els.hitW.value = ''; t.renderHit(sol);
@@ -325,7 +340,7 @@ check('new metric save: rifle fields not converted again', +els.mv.value === 260
   els.hitW.value = '18';
   els.units.value = 'met'; t.convertFormUnits(); t.refreshLabels();
   check('hit: switching to metric converts target size to cm and range error to m', +els.hitW.value === 45.7 && +els.hitRange.value === 5 && /cm/.test(els.lHitW.textContent), els.hitW.value + ' ' + els.hitRange.value);
-  check('hit: settings are saved with the form', /'hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange'\]/.test(inline));
+  check('hit: settings are saved with the form', /'hitShape','hitW','hitH','hitGroup','hitShots','hitSd','hitWind','hitRange','hitBc'/.test(inline));
 }
 // ---- load development tab: shot log, truing, chronograph ----
 {

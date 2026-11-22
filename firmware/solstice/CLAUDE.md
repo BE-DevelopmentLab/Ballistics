@@ -83,7 +83,7 @@ An ESP32-S3 board solves the shot. An Android phone app (installable PWA over We
 
 - Live at https://be-developmentlab.github.io/Ballistics/ (GitHub Pages, repo BE-DevelopmentLab/Ballistics, branch `main`).
 - The repo root holds the contents of `web/`.
-- **When any web file changes, bump `CACHE` in `sw.js`** (currently `ballistics-v19`), or phones keep
+- **When any web file changes, bump `CACHE` in `sw.js`** (currently `ballistics-v20`), or phones keep
   serving the old copy. After Pages rebuilds, the app must be opened twice on the phone to update.
 
 ## First-boot bring-up plan
@@ -212,3 +212,8 @@ MAX17048 is found and in use; BME280 still reads 22.4 C, 54.6 %, 998.1 hPa. `CAC
   (`bullet` field, CSV columns bullet..bc_model) and each load test (shown under the powder). Copy from profile / Use in
   profile; Use in profile only copies weight and diameter when bullet length and twist are already filled (spin-drift data
   is all or nothing). `CACHE` is `ballistics-v19`.
+- Done (2026-11-22): BC uncertainty in hit chance (Brad). New input "BC uncertainty (%)" (default 2). `HitProb.bcSensitivity` solves
+  the phone's solver copy at BC +/-1% in the current conditions (checked against the C++ solver within 3% by `tests/hit_ref.cpp`),
+  and the BC spread is added to the vertical spread like MV spread. It also applies on the Stage tab. Hit chance stays for the one
+  current target only (no range chart); the note gives the target size in MOA/MIL and says when it is smaller than the likely
+  spread. Tests check the target size decides it (a 2 MOA rifle on a 0.5 MOA plate is under 15%). `CACHE` is `ballistics-v20`.
