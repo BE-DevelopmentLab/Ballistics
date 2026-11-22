@@ -1,0 +1,6 @@
+.pio/
+*.exe
+tests/t_*
+tests/proto_tool
+tests/hit_ref
+tests/solver_ref*
