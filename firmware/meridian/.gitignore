@@ -1,0 +1,6 @@
+t_core
+t_fw
+proto_tool
+*.exe
+__pycache__/
+firmware/.pio/

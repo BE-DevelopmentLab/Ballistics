@@ -1,0 +1,130 @@
+# Meridian: rifle-mounted unit (Celestial V2) firmware brief
+
+Meridian is the rifle-mounted unit ("RMU") of the Celestial system. It measures range, atmosphere, rifle angles and
+position, sends them to the camera spotter and the phone over Bluetooth, and shows the dial/hold the spotter sends
+back. Solstice is the V1 handheld; the spotter is a Jetson Orin Nano with a camera. Say "Solstice" and "Meridian",
+not "the board".
+
+## Current state: read this first
+
+- **Written 2026-11-15 before any Meridian parts arrived. Nothing here has run on hardware.** It has not been built
+  with PlatformIO either (the cloud session could not download the toolchain). First job on the laptop: `pio run`.
+- `./run_tests.sh` builds and runs the PC tests (180 checks: packets, laser frames, GPS sentences, rifle angles,
+  screen text, the whole firmware loop against stub hardware, and the Python client against the C++ packets).
+  It must stay green after any change.
+- **Laser protocol checked against ERDI's LRF0306C manual** (`../LRF0306C.pdf`, 2026-11-15): 115200 8N1, frames
+  `EE 16 len 03 cmd params sum`, single range 0x02, continuous 0x04, stop 0x05, first/last target 0x03, error 0x06.
+  Not yet tried on a real module. The laser lives behind the `lrf::RangeFinder` interface (`core/rangefinder.h`).
+- The driver keeps the laser's POWER_ON low between shots (standby 10 mW instead of up to 0.8 W, which would drain
+  the 1200 mAh cell in about 5 hours). A shot after a minute idle takes about 0.4 s longer while the laser starts.
+  Continuous mode keeps it on. Assumed: the module forgets its first/last target setting when switched off, so the
+  driver re-sends it at each power-up.
+- Compass, level and laser need real calibration once the parts are on the rifle (see Bring-up).
+- Meridian reuses Solstice's solver and packets **unchanged** from `../core` (`ballistics.h`, `drag_tables.h`,
+  `protocol.h`). The drag-table caveat from Solstice applies here too.
+
+## Hardware (recommended RMU list from the cost doc)
+
+| Part | Connection | Pins / address |
+| --- | --- | --- |
+| Adafruit Feather ESP32-S3, 8 MB flash, no PSRAM (MINI-1U module: **needs an antenna on the u.FL jack**) | | PlatformIO board `adafruit_feather_esp32s3_nopsram` |
+| ERDI LRF0306C laser, 1535 nm | Serial1, 3.3 V logic | module pin 3 UART_TX -> Feather RX (GPIO 38), pin 2 UART_RX -> Feather TX (GPIO 39), pin 1 POWER_ON -> D6 (GPIO 6), pin 5 power 3-5 V, pin 6 GND, pin 4 not connected |
+| BME280 | STEMMA QT / I2C | 0x77 |
+| BNO085 | STEMMA QT / I2C | 0x4A |
+| PA1010D mini GPS | STEMMA QT / I2C | 0x10 |
+| 1.3" 240x240 TFT (ST7789) | SPI | SCK 36, MOSI 35, CS D10 (GPIO 10), DC D9 (GPIO 9), RST to RESET, backlight D5 (GPIO 5) |
+| RANGE button | to GND | D11 (GPIO 11): press = range, hold 1 s = continuous on/off |
+| MODE button | to GND | D12 (GPIO 12): press within 10 s of a range = save it as the next target (A, B, C); otherwise press = next page; hold 3 s = sleep; press again to wake |
+| Battery gauge (on the Feather) | I2C | MAX17048 0x36, or LC709203F 0x0B on older boards (both handled) |
+
+- GPIO 7 (`I2C_POWER`) switches the STEMMA QT power and must be HIGH before any I2C part answers (done in `setup()`).
+- **Laser power:** the manual gives 3 to 5 V, up to 1.1 W while ranging and up to 3 W peak (about 0.8 A from the
+  LiPo). Feed pin 5 from the Feather's BAT pin (after the power switch), not the 3.3 V pin, whose regulator is
+  shared with the ESP32. A 220 to 470 uF capacitor across pins 5 and 6 near the module is my suggestion for the
+  pulses, not something the manual asks for. The serial pins are 3.3 V, which matches the Feather. ERDI's connector
+  is a 6-pin Tesga FWF08002-S06B13W5M with a thin cable that the manual warns breaks easily.
+- If the laser's POWER_ON is not wired, tie it high and set `LASER_EN_PIN` to -1.
+- All pins are in the "Hardware settings" block at the top of `firmware/src/main.cpp`.
+
+## Bluetooth
+
+Meridian advertises as `Meridian`. Up to 3 links at once (phone, spotter, and Meridian's own link to Solstice; the ESP32 Arduino core caps NimBLE at 3).
+
+1. **Solstice service** (`b4a10000-...`), byte for byte the same as Solstice. Today's phone app connects to Meridian
+   and works unchanged: profile, live solution, range card, env readings, battery, Sleep button. Meridian answers
+   like Solstice, with its BNO085 behind the IMU slope/heading flags and Solstice's wind behind the sensor-wind flag.
+   Request flag bit7 (`0x80`, was reserved) = use Meridian's laser range instead of the typed range. The current app
+   never sets it and Solstice ignores it, so nothing changes for either.
+2. **Meridian service** (`b4a20000-...`, `core/meridian_protocol.h`), for the spotter:
+   - SHOT (notify 5 Hz and at once on each new range): range, range age, pitch, cant, bearing, temperature,
+     pressure, RH, battery, range sequence, compass calibration.
+   - POSITION (notify 1 Hz): GPS lat/lon/alt, fix, satellites, HDOP, UTC, declination in use.
+   - CORRECTION (write): elevation and windage (mrad), range it was solved for, time of flight, lead, hit chance,
+     target number, wind used, sequence. Meridian shows it for 2 minutes (amber after 30 s, or if it was solved for
+     a range more than 5 m from the latest laser range).
+   - COMMAND (write): range, continuous, level zero, declination, aim bearing, mount, compass calibration start/save,
+     units, laser offset, first/last target, Solstice link on/off, sleep.
+   - MESSAGE (write): up to 20 characters for the bottom line ("SEND IT").
+   - STATUS (notify 1 Hz and after each command): calibration values, last command result, links, laser state.
+   - TARGET (notify, read): a saved target A, B or C: line-of-sight range, incline and bearing at the moment of the
+     laser shot, the shooter's GPS position and the time. Notified on save or clear, and for all three slots after
+     the `send_targets` command. This is the capture step for the future target map and stage planner.
+   - Commands added 2026-11-17: `save_target` (A, B, C or next), `clear_targets` (one or all), `send_targets`,
+     `autosleep` (minutes, 0 = never). None of this touches the Solstice service, so Solstice and the app are unchanged.
+3. **Wind from Solstice:** Meridian scans for a device named `Solstice` with the Solstice service and subscribes to
+   its env packet. Solstice keeps advertising while a link is open (change approved by Brad 2026-11-15, in the
+   laptop's Solstice `main.cpp`), so the phone and Meridian can both connect to it. Solstice firmware older than
+   that stops advertising once the phone connects, and then Meridian can't find it.
+
+`tools/meridian_client.py` (Python, `pip install bleak`) talks to Meridian from the laptop or the Jetson:
+`scan`, `watch`, `range`, `correct 5.0 -1.2 --range 612`, `message "SEND IT"`, and every command. The spotter
+software can import its `pack_correction()` / `unpack_shot()` functions.
+
+## Screen
+
+Pages (MODE cycles them): 1 shooting, 2 saved targets, 3 setup.
+
+Page 1 (shooting): source (SPOTTER / MERIDIAN / NO SOLUTION) and units, battery and links, elevation and windage in
+big text, range (or RANGING / NO TARGET / LASER FAULT), lead or hit chance, a cant bar (red past 1 degree), pitch and
+bearing, the spotter's message. The message line also shows Meridian's own notes: "MODE: SAVE AS A" after a
+range, "SAVED A 846 m", and "SLEEP IN 30s". Page 2 lists targets A, B, C. Page 3 (setup): sensors, GPS, laser,
+calibration. With no spotter, Meridian solves
+for itself once the phone app has sent the rifle profile: laser range, BNO085 angles, GPS latitude, Solstice wind,
+and the wind direction and spin/Coriolis/jump switches from the app's last request.
+
+## Saved targets and auto-sleep (added 2026-11-17)
+
+- **Targets:** range with RANGE, then press MODE within 10 s. The range, plus the incline and bearing taken at the
+  instant of the laser shot (not when MODE is pressed), go into the next slot in turn (A, B, C, then A again). Saved
+  targets survive power-off (NVS). The same range is never saved twice by the button; a second MODE press changes page.
+- **Auto-sleep:** after 10 minutes with no use (default; `autosleep <minutes>`, 0 = never, max 120) Meridian goes
+  into the same deep sleep as a manual sleep, and MODE wakes it. Use = any button, a laser range, any write from the
+  phone or spotter, or moving the rifle more than 2 degrees, so it won't sleep while you are aiming. It never sleeps
+  while charging or in continuous ranging. The screen warns for the last 30 s. Not exposed in STATUS (no spare byte).
+
+## Bring-up plan (when the parts arrive)
+
+1. `cd meridian/firmware && pio run`. Fix compile errors without changing `core/` behaviour, then `./run_tests.sh`.
+2. Flash with only the Feather and the screen connected. Check the start-up text, then that the phone app connects
+   to "Meridian" and shows its BME280 readings.
+3. Add the BME280, BNO085 and GPS. Serial monitor prints what was found and an `env` line every 5 s.
+4. BNO085: raise the muzzle and check pitch goes positive; roll right and check cant goes positive; point roughly
+   north and east. If pitch is backwards, the world frame is Z-down (see `core/orientation.h`). If the sensor is not
+   flat with +Y toward the muzzle, send the right `mount` code.
+5. Compass: away from steel, `magcal-start`, move the rifle in slow figure-8s until the calibration reads 3/3,
+   `magcal-save`. Then set `declination` for the area, or aim at a known bearing and send `aim <bearing>`.
+   Expect the steel of the rifle and scope to bend the compass: calibrate with Meridian on the rifle.
+6. Level: with the scope's bubble level, send `level`.
+7. Laser: check the self-check reply in the serial log, range known distances (a 100 m and a 300+ m target), and
+   set `laser-offset` if there is a constant error. Try first vs last target. Minimum range is 10 m. The 1535 nm
+   beam is invisible, so line it up with the scope by walking it across the edge of a known target. Check the
+   manual's note on the window: anything in front of the lenses should be AR-coated for 1535 nm.
+8. Solstice link: flash the updated Solstice, connect the phone to Solstice, then check Meridian's screen shows WIND too.
+9. Spotter: `python tools/meridian_client.py correct 5.0 -1.2 --range <laser range>` and check the screen.
+
+## Working rules
+
+- Run `./run_tests.sh` before saying anything works, and never claim a part works from a compile alone.
+- Ask Brad before changing anything in Solstice (`../core`, `../firmware`, `../web`) or the live app.
+- Meridian protocol changes: update `core/meridian_protocol.h`, `tools/meridian_client.py` and the tests together,
+  and bump `meridian::kVersion` if a layout changes.
